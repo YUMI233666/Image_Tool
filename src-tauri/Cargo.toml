@@ -1,0 +1,35 @@
+[package]
+name = "art_tool"
+version = "0.1.0"
+description = "Desktop batch image processing tool"
+authors = ["art-tool"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.75"
+
+[lib]
+name = "art_tool_lib"
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "art_tool"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+tauri = { version = "1.6", features = ["dialog-all", "fs-all", "path-all", "shell-open"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+uuid = { version = "1.10", features = ["v4", "serde"] }
+walkdir = "2.5"
+rayon = "1.10"
+once_cell = "1.20"
+dashmap = "6.1"
+chrono = { version = "0.4", features = ["clock", "serde"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff"] }
+
+[dev-dependencies]
+tempfile = "3.13"
