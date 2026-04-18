@@ -1,10 +1,12 @@
 use crate::core::batch_job_runner::{run_batch_job, BatchJobRequest};
+use crate::core::file_discovery::discover_files;
 use crate::core::processor::ProcessorDescriptor;
 use crate::core::registry::ProcessorRegistry;
 use crate::core::report::{write_report_to_file, BatchJobReport};
 use dashmap::DashSet;
+use image::ImageReader;
 use once_cell::sync::Lazy;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Command;
@@ -30,9 +32,63 @@ pub struct StartBatchJobRequest {
   pub write_report: Option<bool>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewDiscoveredFilesRequest {
+  pub processor_id: String,
+  pub input_paths: Vec<String>,
+  #[serde(default)]
+  pub include_subdirectories: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathImageInfo {
+  pub path: String,
+  pub exists: bool,
+  pub is_file: bool,
+  pub is_directory: bool,
+  pub file_size_bytes: Option<u64>,
+  pub width: Option<u32>,
+  pub height: Option<u32>,
+  pub image_format: Option<String>,
+  pub color_type: Option<String>,
+  pub message: Option<String>,
+}
+
 #[tauri::command]
 pub fn list_processors() -> Vec<ProcessorDescriptor> {
   PROCESSOR_REGISTRY.descriptors()
+}
+
+#[tauri::command]
+pub fn preview_discovered_files(
+  request: PreviewDiscoveredFilesRequest,
+) -> Result<Vec<String>, String> {
+  if request.input_paths.is_empty() {
+    return Ok(Vec::new());
+  }
+
+  let include_subdirectories = request.include_subdirectories.unwrap_or(true);
+  let input_paths = request
+    .input_paths
+    .iter()
+    .map(PathBuf::from)
+    .collect::<Vec<_>>();
+
+  let discovered = discover_files(
+    &input_paths,
+    request.processor_id.as_str(),
+    include_subdirectories,
+  )
+  .map_err(|err| err.user_message())?;
+
+  Ok(
+    discovered
+      .iter()
+      .map(|path| path.to_string_lossy().to_string())
+      .collect(),
+  )
 }
 
 #[tauri::command]
@@ -139,4 +195,83 @@ pub fn open_path_in_system(app: tauri::AppHandle, path: String) -> Result<(), St
   }
 
   Ok(())
+}
+
+#[tauri::command]
+pub fn get_path_image_info(path: String) -> Result<PathImageInfo, String> {
+  let trimmed = path.trim();
+  if trimmed.is_empty() {
+    return Err("路径不能为空。".to_string());
+  }
+
+  let target = PathBuf::from(trimmed);
+  if !target.exists() {
+    return Ok(PathImageInfo {
+      path: trimmed.to_string(),
+      exists: false,
+      is_file: false,
+      is_directory: false,
+      file_size_bytes: None,
+      width: None,
+      height: None,
+      image_format: None,
+      color_type: None,
+      message: Some("路径不存在。".to_string()),
+    });
+  }
+
+  let metadata = std::fs::metadata(&target)
+    .map_err(|err| format!("读取路径元数据失败: {err}"))?;
+
+  let is_file = metadata.is_file();
+  let is_directory = metadata.is_dir();
+
+  let mut payload = PathImageInfo {
+    path: trimmed.to_string(),
+    exists: true,
+    is_file,
+    is_directory,
+    file_size_bytes: if is_file { Some(metadata.len()) } else { None },
+    width: None,
+    height: None,
+    image_format: None,
+    color_type: None,
+    message: None,
+  };
+
+  if !is_file {
+    payload.message = Some("该路径是目录，未读取图片参数信息。".to_string());
+    return Ok(payload);
+  }
+
+  let guessed_reader = match ImageReader::open(&target) {
+    Ok(reader) => match reader.with_guessed_format() {
+      Ok(reader) => reader,
+      Err(err) => {
+        payload.message = Some(format!("无法识别文件格式: {err}"));
+        return Ok(payload);
+      }
+    },
+    Err(err) => {
+      payload.message = Some(format!("文件读取失败: {err}"));
+      return Ok(payload);
+    }
+  };
+
+  payload.image_format = guessed_reader
+    .format()
+    .map(|format| format!("{format:?}").to_ascii_lowercase());
+
+  match guessed_reader.decode() {
+    Ok(image) => {
+      payload.width = Some(image.width());
+      payload.height = Some(image.height());
+      payload.color_type = Some(format!("{:?}", image.color()).to_ascii_lowercase());
+    }
+    Err(err) => {
+      payload.message = Some(format!("无法解析为图片: {err}"));
+    }
+  }
+
+  Ok(payload)
 }

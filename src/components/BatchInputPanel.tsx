@@ -136,6 +136,7 @@ export default function BatchInputPanel({
         />
         <span>递归处理子目录</span>
       </label>
+      <p className="hint">说明：仅在选择输入文件夹时生效。开启后会扫描该文件夹下的所有子目录；关闭时只扫描当前目录。</p>
 
       <label className="field">
         <span>最大并发数</span>

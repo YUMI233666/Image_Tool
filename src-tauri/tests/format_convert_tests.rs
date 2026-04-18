@@ -16,6 +16,18 @@ fn create_sample_png(path: &std::path::Path) {
   image.save(path).expect("failed to save sample image");
 }
 
+fn create_sample_webp(path: &std::path::Path) {
+  let mut image = RgbaImage::from_pixel(32, 20, Rgba([0, 0, 0, 0]));
+
+  for y in 3..=16 {
+    for x in 5..=27 {
+      image.put_pixel(x, y, Rgba([20, 180, 90, 220]));
+    }
+  }
+
+  image.save(path).expect("failed to save sample webp image");
+}
+
 #[test]
 fn converts_png_to_jpg_successfully() {
   let tmp = tempdir().expect("create temp dir");
@@ -62,4 +74,74 @@ fn rejects_unsupported_target_format() {
   let validate = processor.validate(&json!({"targetFormat":"gif"}));
 
   assert!(validate.is_err());
+}
+
+#[test]
+fn converts_webp_to_jpg_successfully() {
+  let tmp = tempdir().expect("create temp dir");
+  let input_path = tmp.path().join("input.webp");
+  let output_path = tmp.path().join("converted.webp");
+
+  create_sample_webp(&input_path);
+
+  let processor = FormatConvertProcessor;
+  let context = ProcessContext {
+    processor_id: "format-convert".to_string(),
+    input_path: input_path.clone(),
+    output_path: output_path.clone(),
+    params: json!({"targetFormat":"jpg"}),
+  };
+
+  let result = processor.process(&context).expect("webp to jpg should succeed");
+
+  assert_eq!(result.status, ProcessStatus::Success);
+  let final_path = result.output_path.expect("output path should exist");
+  assert!(final_path.exists());
+  assert_eq!(
+    final_path
+      .extension()
+      .and_then(|ext| ext.to_str())
+      .expect("output extension should exist"),
+    "jpg"
+  );
+
+  let decoded = image::ImageReader::open(&final_path)
+    .expect("open converted image")
+    .with_guessed_format()
+    .expect("guess converted image format")
+    .decode()
+    .expect("decode converted image");
+
+  assert_eq!(decoded.width(), 32);
+  assert_eq!(decoded.height(), 20);
+}
+
+#[test]
+fn converts_webp_to_png_successfully() {
+  let tmp = tempdir().expect("create temp dir");
+  let input_path = tmp.path().join("input.webp");
+  let output_path = tmp.path().join("converted.webp");
+
+  create_sample_webp(&input_path);
+
+  let processor = FormatConvertProcessor;
+  let context = ProcessContext {
+    processor_id: "format-convert".to_string(),
+    input_path: input_path.clone(),
+    output_path: output_path.clone(),
+    params: json!({"targetFormat":"png"}),
+  };
+
+  let result = processor.process(&context).expect("webp to png should succeed");
+
+  assert_eq!(result.status, ProcessStatus::Success);
+  let final_path = result.output_path.expect("output path should exist");
+  assert!(final_path.exists());
+  assert_eq!(
+    final_path
+      .extension()
+      .and_then(|ext| ext.to_str())
+      .expect("output extension should exist"),
+    "png"
+  );
 }

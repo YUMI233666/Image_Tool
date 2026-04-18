@@ -3,6 +3,7 @@ use crate::core::processors::{
   compress::CompressProcessor,
   format_convert::FormatConvertProcessor,
   repair::RepairProcessor,
+  resolution_transform::ResolutionTransformProcessor,
   trim_transparent::TrimTransparentProcessor,
 };
 use std::collections::HashMap;
@@ -51,6 +52,7 @@ impl ProcessorRegistry {
     registry.register(FormatConvertProcessor::default());
     registry.register(CompressProcessor::default());
     registry.register(RepairProcessor::default());
+    registry.register(ResolutionTransformProcessor::default());
     registry
   }
 }

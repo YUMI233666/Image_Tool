@@ -1,6 +1,6 @@
 # Processor 接口规范
 
-本文档用于约束 Art Tool 的处理器扩展接入方式，适用于图像格式转换、图像压缩、图像修复等后续功能。
+本文档用于约束 Art Tool 的处理器扩展接入方式，适用于图像格式转换、图像压缩、图像修复、分辨率变换等后续功能。
 
 ## 目标
 - 保证新功能可被统一调度。
@@ -22,7 +22,8 @@
 ## 参数模型建议
 - 图像格式转换：targetFormat、background、quality（可选）。
 - 图像压缩：quality、mode（lossy/lossless/balanced）。
-- 图像修复：mode（auto/denoise/scratch）、strength。
+- 图像修复：mode（auto/denoise/scratch/upscale）、strength、upscaleFactor（2-4，仅 upscale 模式生效）、upscaleSharpness（1-100，仅 upscale 模式生效）。
+- 变换分辨率：targetWidth、targetHeight、upscaleSharpness（1-100）、fileOverrides（按输入路径覆盖目标分辨率）。
 
 ## 错误处理规范
 - 参数错误：返回 Validation。

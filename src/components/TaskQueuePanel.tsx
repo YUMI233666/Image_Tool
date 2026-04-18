@@ -36,6 +36,10 @@ export default function TaskQueuePanel({
         <p className="muted">当前没有运行中的任务。</p>
       ) : null}
 
+      {isRunning && !progress ? (
+        <p className="muted">任务已启动，正在等待进度回传...</p>
+      ) : null}
+
       <div className="progress-track" aria-label="batch-progress-track">
         <div className="progress-bar" style={{ width: `${percent}%` }} />
       </div>

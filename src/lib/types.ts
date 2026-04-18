@@ -2,9 +2,10 @@ export type ProcessorId =
   | "trim-transparent"
   | "format-convert"
   | "compress"
-  | "repair";
+  | "repair"
+  | "resolution-transform";
 
-export type ItemStatus = "success" | "failed" | "skipped" | "cancelled";
+export type ItemStatus = "success" | "failed" | "skipped" | "cancelled" | "running";
 
 export interface ProcessorDescriptor {
   id: ProcessorId;
@@ -56,4 +57,17 @@ export interface BatchProgressPayload {
   currentFile: string;
   status: ItemStatus;
   message: string;
+}
+
+export interface PathImageInfo {
+  path: string;
+  exists: boolean;
+  isFile: boolean;
+  isDirectory: boolean;
+  fileSizeBytes?: number;
+  width?: number;
+  height?: number;
+  imageFormat?: string;
+  colorType?: string;
+  message?: string;
 }

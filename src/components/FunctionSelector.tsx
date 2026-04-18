@@ -17,7 +17,7 @@ export default function FunctionSelector({
   return (
     <section className="panel">
       <h2>功能选择</h2>
-      <p className="muted">当前版本默认可用：透明边缘裁剪。</p>
+      <p className="muted">当前版本可用：透明边缘裁剪、图像格式转换、图像压缩、图像修复、变换分辨率。</p>
 
       <label className="field">
         <span>处理功能</span>
@@ -32,7 +32,7 @@ export default function FunctionSelector({
               disabled={!processor.enabled}
             >
               {processor.displayName}
-              {!processor.enabled ? "（预留）" : ""}
+              {!processor.enabled ? "（暂不可用）" : ""}
             </option>
           ))}
         </select>

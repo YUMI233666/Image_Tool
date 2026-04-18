@@ -6,9 +6,17 @@ use crate::core::processor::{
   Processor,
   ProcessorDescriptor,
 };
-use image::{DynamicImage, GenericImageView, ImageFormat, ImageReader};
+use image::{
+  DynamicImage,
+  GenericImageView,
+  ImageFormat,
+  ImageReader,
+  Rgb,
+  RgbImage,
+};
 use serde::Deserialize;
 use serde_json::Value;
+use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,6 +36,66 @@ fn parse_target_format(raw: &str) -> Option<(&'static str, ImageFormat)> {
   }
 }
 
+fn parse_input_format_by_extension(path: &Path) -> Option<ImageFormat> {
+  let extension = path.extension()?.to_str()?.trim().to_ascii_lowercase();
+
+  match extension.as_str() {
+    "png" => Some(ImageFormat::Png),
+    "jpg" | "jpeg" => Some(ImageFormat::Jpeg),
+    "webp" => Some(ImageFormat::WebP),
+    "bmp" => Some(ImageFormat::Bmp),
+    "tiff" | "tif" => Some(ImageFormat::Tiff),
+    _ => None,
+  }
+}
+
+fn decode_with_fallback(path: &Path) -> Result<DynamicImage, ProcessError> {
+  let reader = ImageReader::open(path)?;
+  let guessed = reader.with_guessed_format()?;
+
+  match guessed.decode() {
+    Ok(image) => Ok(image),
+    Err(primary_error) => {
+      let Some(fallback_format) = parse_input_format_by_extension(path) else {
+        return Err(ProcessError::Image(primary_error));
+      };
+
+      let mut fallback_reader = ImageReader::open(path)?;
+      fallback_reader.set_format(fallback_format);
+      let fallback = fallback_reader.decode();
+
+      fallback.map_err(|_| ProcessError::Image(primary_error))
+    }
+  }
+}
+
+fn flatten_to_rgb_with_white_background(source: &DynamicImage) -> DynamicImage {
+  let rgba = source.to_rgba8();
+  let (width, height) = rgba.dimensions();
+  let mut rgb = RgbImage::new(width, height);
+
+  for y in 0..height {
+    for x in 0..width {
+      let pixel = rgba.get_pixel(x, y).0;
+      let alpha = pixel[3] as f32 / 255.0;
+
+      let compose = |channel: u8| {
+        let base = channel as f32 * alpha;
+        let background = 255.0 * (1.0 - alpha);
+        (base + background).round().clamp(0.0, 255.0) as u8
+      };
+
+      rgb.put_pixel(
+        x,
+        y,
+        Rgb([compose(pixel[0]), compose(pixel[1]), compose(pixel[2])]),
+      );
+    }
+  }
+
+  DynamicImage::ImageRgb8(rgb)
+}
+
 #[derive(Default)]
 pub struct FormatConvertProcessor;
 
@@ -37,7 +105,7 @@ impl Processor for FormatConvertProcessor {
       id: "format-convert".to_string(),
       display_name: "图像格式转换".to_string(),
       enabled: true,
-      notes: "支持 PNG/JPG/WEBP/BMP/TIFF 等常见格式互转。".to_string(),
+      notes: "支持 PNG/JPG/WEBP 格式互转。".to_string(),
     }
   }
 
@@ -60,9 +128,7 @@ impl Processor for FormatConvertProcessor {
       ProcessError::Validation("targetFormat 不受支持，请使用 png/jpg/webp/bmp/tiff".to_string())
     })?;
 
-    let source_image = ImageReader::open(&context.input_path)?
-      .with_guessed_format()?
-      .decode()?;
+    let source_image = decode_with_fallback(&context.input_path)?;
     let (source_width, source_height) = source_image.dimensions();
 
     let mut output_path = context.output_path.clone();
@@ -72,15 +138,13 @@ impl Processor for FormatConvertProcessor {
     }
 
     let converted: DynamicImage = match target_format {
-      ImageFormat::Jpeg => DynamicImage::ImageRgb8(source_image.to_rgb8()),
+      ImageFormat::Jpeg => flatten_to_rgb_with_white_background(&source_image),
       _ => source_image.clone(),
     };
 
     converted.save_with_format(&output_path, target_format)?;
 
-    let output_image = ImageReader::open(&output_path)?
-      .with_guessed_format()?
-      .decode()?;
+    let output_image = decode_with_fallback(&output_path)?;
     let (output_width, output_height) = output_image.dimensions();
 
     let mut result = ProcessResult::success("格式转换完成。", output_path);

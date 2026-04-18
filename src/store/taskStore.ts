@@ -35,8 +35,14 @@ export interface TaskStore {
 const defaultParams: Record<ProcessorId, Record<string, unknown>> = {
   "trim-transparent": { alphaThreshold: 0, padding: 0 },
   "format-convert": { targetFormat: "png" },
-  compress: { quality: 80, mode: "balanced" },
-  repair: { mode: "auto", strength: 50 },
+  compress: { quality: 65, mode: "lossy" },
+  repair: { mode: "auto", strength: 50, upscaleFactor: 2, upscaleSharpness: 70 },
+  "resolution-transform": {
+    targetWidth: 1920,
+    targetHeight: 1080,
+    upscaleSharpness: 70,
+    fileOverrides: {},
+  },
 };
 
 export const useTaskStore = create<TaskStore>((set) => ({
@@ -44,7 +50,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
   selectedProcessorId: "trim-transparent",
   inputPaths: [],
   outputDir: "",
-  includeSubdirectories: true,
+  includeSubdirectories: false,
   maxConcurrency: 4,
   paramsByProcessor: defaultParams,
   activeJobId: null,

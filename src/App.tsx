@@ -1,17 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import BatchInputPanel from "./components/BatchInputPanel";
+import FileInspectorPanel from "./components/FileInspectorPanel";
 import FunctionSelector from "./components/FunctionSelector";
 import ResultSummaryPanel from "./components/ResultSummaryPanel";
 import TaskQueuePanel from "./components/TaskQueuePanel";
 import {
   cancelBatchJob,
+  getPathImageInfo,
   listProcessors,
   listenBatchComplete,
   listenBatchProgress,
   openPathInSystem,
+  previewDiscoveredFiles,
   startBatchJob,
 } from "./lib/api/tauri";
-import type { ProcessorDescriptor, ProcessorId } from "./lib/types";
+import type {
+  BatchItemReport,
+  PathImageInfo,
+  ProcessorDescriptor,
+  ProcessorId,
+} from "./lib/types";
 import { useTaskStore } from "./store/taskStore";
 
 const fallbackProcessors: ProcessorDescriptor[] = [
@@ -25,21 +33,38 @@ const fallbackProcessors: ProcessorDescriptor[] = [
     id: "format-convert",
     displayName: "图像格式转换",
     enabled: true,
-    notes: "支持常见图像格式互转。",
+    notes: "支持 PNG/JPG/WEBP 格式互转。",
   },
   {
     id: "compress",
     displayName: "图像压缩",
-    enabled: false,
-    notes: "扩展预留：用于后续有损/无损压缩策略。",
+    enabled: true,
+    notes: "支持 JPG/PNG/WEBP 压缩（BMP/TIFF 建议先转换后再压缩）。",
   },
   {
     id: "repair",
     displayName: "图像修复",
-    enabled: false,
-    notes: "扩展预留：用于后续去噪、补全、修复。",
+    enabled: true,
+    notes: "支持自动修复、边缘保留去噪、轻度划痕修复与低分辨率增强（独立锐化强度）。",
+  },
+  {
+    id: "resolution-transform",
+    displayName: "变换分辨率",
+    enabled: true,
+    notes: "支持目标分辨率缩放：目标更小时压缩、目标更大时超分；PNG 可透明居中占位，支持单文件目标覆盖。",
   },
 ];
+
+const INSPECT_LOADING_DELAY_MS = 180;
+const RESOLUTION_MIN_EDGE = 1;
+const RESOLUTION_MAX_EDGE = 16384;
+const PARAM_MIN_STRENGTH = 1;
+const PARAM_MAX_STRENGTH = 100;
+
+type ResolutionFileOverrideMap = Record<
+  string,
+  { targetWidth?: unknown; targetHeight?: unknown }
+>;
 
 function clampInt(value: unknown, min: number, max: number): number {
   if (typeof value !== "number" || Number.isNaN(value)) {
@@ -77,6 +102,20 @@ export default function App() {
   } = useTaskStore();
 
   const [uiError, setUiError] = useState<string>("");
+  const [selectedInputPath, setSelectedInputPath] = useState<string | null>(null);
+  const [selectedOutputPath, setSelectedOutputPath] = useState<string | null>(null);
+  const [inspectedInfo, setInspectedInfo] = useState<PathImageInfo | null>(null);
+  const [isInspecting, setIsInspecting] = useState(false);
+  const [inspectError, setInspectError] = useState("");
+  const [overrideCandidatePaths, setOverrideCandidatePaths] = useState<string[]>([]);
+  const [isLoadingOverrideCandidates, setIsLoadingOverrideCandidates] = useState(false);
+  const [overrideCandidatesError, setOverrideCandidatesError] = useState("");
+  const inspectRequestIdRef = useRef(0);
+  const inspectLoadingTimerRef = useRef<number | null>(null);
+  const inspectCacheRef = useRef<Map<string, PathImageInfo>>(new Map());
+  const progressUnlistenRef = useRef<(() => void) | null>(null);
+  const completeUnlistenRef = useRef<(() => void) | null>(null);
+  const bindingPromiseRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -106,38 +145,226 @@ export default function App() {
   }, [setAvailableProcessors]);
 
   useEffect(() => {
-    let unlistenProgress: (() => void) | null = null;
-    let unlistenComplete: (() => void) | null = null;
+    return () => {
+      if (inspectLoadingTimerRef.current !== null) {
+        window.clearTimeout(inspectLoadingTimerRef.current);
+        inspectLoadingTimerRef.current = null;
+      }
+    };
+  }, []);
 
-    const bindEvents = async () => {
-      unlistenProgress = await listenBatchProgress((payload) => {
+  const ensureBatchListenersBound = useCallback(async () => {
+    if (progressUnlistenRef.current && completeUnlistenRef.current) {
+      return;
+    }
+
+    if (bindingPromiseRef.current) {
+      await bindingPromiseRef.current;
+      return;
+    }
+
+    bindingPromiseRef.current = (async () => {
+      const unlistenProgress = await listenBatchProgress((payload) => {
         setActiveJobId(payload.jobId);
         setProgress(payload);
       });
 
-      unlistenComplete = await listenBatchComplete((payload) => {
+      const unlistenComplete = await listenBatchComplete((payload) => {
         finishRun(payload);
       });
-    };
 
-    bindEvents().catch(() => undefined);
+      progressUnlistenRef.current = unlistenProgress;
+      completeUnlistenRef.current = unlistenComplete;
+    })();
+
+    try {
+      await bindingPromiseRef.current;
+    } finally {
+      bindingPromiseRef.current = null;
+    }
+  }, [finishRun, setActiveJobId, setProgress]);
+
+  useEffect(() => {
+    ensureBatchListenersBound().catch(() => undefined);
 
     return () => {
-      if (unlistenProgress) {
-        unlistenProgress();
+      if (progressUnlistenRef.current) {
+        progressUnlistenRef.current();
+        progressUnlistenRef.current = null;
       }
 
-      if (unlistenComplete) {
-        unlistenComplete();
+      if (completeUnlistenRef.current) {
+        completeUnlistenRef.current();
+        completeUnlistenRef.current = null;
       }
     };
-  }, [finishRun, setActiveJobId, setProgress]);
+  }, [ensureBatchListenersBound]);
 
   const selectedProcessor = useMemo(() => {
     return availableProcessors.find((item) => item.id === selectedProcessorId);
   }, [availableProcessors, selectedProcessorId]);
 
+  const outputItems = useMemo<BatchItemReport[]>(() => {
+    if (!report) {
+      return [];
+    }
+
+    return report.items.filter((item) => Boolean(item.outputPath));
+  }, [report]);
+
   const selectedParams = paramsByProcessor[selectedProcessorId];
+
+  useEffect(() => {
+    if (selectedProcessorId !== "resolution-transform") {
+      setOverrideCandidatePaths([]);
+      setIsLoadingOverrideCandidates(false);
+      setOverrideCandidatesError("");
+      return;
+    }
+
+    if (inputPaths.length === 0) {
+      setOverrideCandidatePaths([]);
+      setIsLoadingOverrideCandidates(false);
+      setOverrideCandidatesError("");
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingOverrideCandidates(true);
+    setOverrideCandidatesError("");
+
+    previewDiscoveredFiles(
+      "resolution-transform",
+      inputPaths,
+      includeSubdirectories,
+    )
+      .then((paths) => {
+        if (cancelled) {
+          return;
+        }
+
+        setOverrideCandidatePaths(paths);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        const reason =
+          error instanceof Error
+            ? error.message
+            : "加载批处理文件列表失败，已回退为输入路径列表。";
+        setOverrideCandidatesError(reason);
+        setOverrideCandidatePaths(inputPaths);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingOverrideCandidates(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [includeSubdirectories, inputPaths, selectedProcessorId]);
+
+  const inspectPathInfo = async (path: string) => {
+    const requestId = inspectRequestIdRef.current + 1;
+    inspectRequestIdRef.current = requestId;
+
+    setInspectError("");
+
+    const cached = inspectCacheRef.current.get(path);
+    if (cached) {
+      setIsInspecting(false);
+      setInspectedInfo(cached);
+      return;
+    }
+
+    if (inspectLoadingTimerRef.current !== null) {
+      window.clearTimeout(inspectLoadingTimerRef.current);
+      inspectLoadingTimerRef.current = null;
+    }
+
+    inspectLoadingTimerRef.current = window.setTimeout(() => {
+      if (inspectRequestIdRef.current === requestId) {
+        setIsInspecting(true);
+      }
+    }, INSPECT_LOADING_DELAY_MS);
+
+    try {
+      const info = await getPathImageInfo(path);
+      if (inspectRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      inspectCacheRef.current.set(path, info);
+      setInspectedInfo(info);
+    } catch (error) {
+      if (inspectRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      const reason =
+        error instanceof Error ? error.message : "读取图片参数信息失败。";
+      setInspectedInfo(null);
+      setInspectError(reason);
+    } finally {
+      if (inspectRequestIdRef.current === requestId) {
+        if (inspectLoadingTimerRef.current !== null) {
+          window.clearTimeout(inspectLoadingTimerRef.current);
+          inspectLoadingTimerRef.current = null;
+        }
+
+        setIsInspecting(false);
+      }
+    }
+  };
+
+  const handleSelectInputPath = (path: string) => {
+    if (selectedInputPath === path && selectedOutputPath === null) {
+      return;
+    }
+
+    setSelectedInputPath(path);
+    setSelectedOutputPath(null);
+    inspectPathInfo(path).catch(() => undefined);
+  };
+
+  const handleSelectOutputPath = (path: string) => {
+    if (selectedOutputPath === path && selectedInputPath === null) {
+      return;
+    }
+
+    setSelectedOutputPath(path);
+    setSelectedInputPath(null);
+    inspectPathInfo(path).catch(() => undefined);
+  };
+
+  useEffect(() => {
+    if (!selectedInputPath) {
+      return;
+    }
+
+    if (!inputPaths.includes(selectedInputPath)) {
+      setSelectedInputPath(null);
+      setInspectedInfo(null);
+      setInspectError("");
+    }
+  }, [inputPaths, selectedInputPath]);
+
+  useEffect(() => {
+    if (!selectedOutputPath) {
+      return;
+    }
+
+    const stillExists = outputItems.some((item) => item.outputPath === selectedOutputPath);
+    if (!stillExists) {
+      setSelectedOutputPath(null);
+      setInspectedInfo(null);
+      setInspectError("");
+    }
+  }, [outputItems, selectedOutputPath]);
 
   const start = async () => {
     setUiError("");
@@ -154,11 +381,30 @@ export default function App() {
     }
 
     if (!selectedProcessor?.enabled) {
-      setUiError("当前功能处于预留状态，暂不可执行。");
+      setUiError("当前功能暂不可执行。");
+      return;
+    }
+
+    try {
+      await ensureBatchListenersBound();
+    } catch {
+      setUiError("任务进度监听初始化失败，请重试。");
       return;
     }
 
     beginRun();
+    setProgress({
+      jobId: activeJobId ?? "pending",
+      processed: 0,
+      total: 0,
+      succeeded: 0,
+      failed: 0,
+      skipped: 0,
+      cancelled: 0,
+      currentFile: "",
+      status: "running",
+      message: "任务已启动，等待后端回传进度...",
+    });
 
     try {
       const nextReport = await startBatchJob({
@@ -292,29 +538,49 @@ export default function App() {
         );
       case "compress":
         return (
-          <label className="field">
-            <span>压缩质量 (1-100)</span>
-            <input
-              type="number"
-              min={1}
-              max={100}
-              disabled={isRunning}
-              value={clampInt(selectedParams.quality, 1, 100)}
-              onChange={(event) =>
-                patchParams("compress", {
-                  quality: clampInt(Number(event.target.value), 1, 100),
-                })
-              }
-            />
-          </label>
+          <>
+            <label className="field">
+              <span>压缩模式</span>
+              <select
+                value={String(selectedParams.mode ?? "balanced")}
+                onChange={(event) =>
+                  patchParams("compress", {
+                    mode: event.target.value,
+                  })
+                }
+                disabled={isRunning}
+              >
+                <option value="balanced">balanced（平衡）</option>
+                <option value="lossy">lossy（有损）</option>
+                <option value="lossless">lossless（无损）</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>压缩质量 (1-100)</span>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                disabled={isRunning}
+                value={clampInt(selectedParams.quality, 1, 100)}
+                onChange={(event) =>
+                  patchParams("compress", {
+                    quality: clampInt(Number(event.target.value), 1, 100),
+                  })
+                }
+              />
+            </label>
+          </>
         );
       case "repair":
+      {
+        const repairMode = String(selectedParams.mode ?? "auto");
         return (
           <>
             <label className="field">
               <span>修复模式</span>
               <select
-                value={String(selectedParams.mode ?? "auto")}
+                value={repairMode}
                 onChange={(event) =>
                   patchParams("repair", { mode: event.target.value })
                 }
@@ -323,25 +589,294 @@ export default function App() {
                 <option value="auto">自动</option>
                 <option value="denoise">去噪</option>
                 <option value="scratch">划痕修复</option>
+                <option value="upscale">低分辨率增强</option>
               </select>
             </label>
             <label className="field">
               <span>修复强度 (1-100)</span>
               <input
                 type="number"
-                min={1}
-                max={100}
+                min={PARAM_MIN_STRENGTH}
+                max={PARAM_MAX_STRENGTH}
                 disabled={isRunning}
-                value={clampInt(selectedParams.strength, 1, 100)}
+                value={clampInt(selectedParams.strength, PARAM_MIN_STRENGTH, PARAM_MAX_STRENGTH)}
                 onChange={(event) =>
                   patchParams("repair", {
-                    strength: clampInt(Number(event.target.value), 1, 100),
+                    strength: clampInt(
+                      Number(event.target.value),
+                      PARAM_MIN_STRENGTH,
+                      PARAM_MAX_STRENGTH,
+                    ),
                   })
                 }
               />
             </label>
+            {repairMode === "upscale" ? (
+              <>
+                <label className="field">
+                  <span>放大倍数 (2-4)</span>
+                  <select
+                    value={String(clampInt(selectedParams.upscaleFactor, 2, 4))}
+                    onChange={(event) =>
+                      patchParams("repair", {
+                        upscaleFactor: clampInt(Number(event.target.value), 2, 4),
+                      })
+                    }
+                    disabled={isRunning}
+                  >
+                    <option value="2">2x</option>
+                    <option value="3">3x</option>
+                    <option value="4">4x</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>超分锐化强度 (1-100)</span>
+                  <input
+                    type="number"
+                    min={PARAM_MIN_STRENGTH}
+                    max={PARAM_MAX_STRENGTH}
+                    disabled={isRunning}
+                    value={clampInt(
+                      selectedParams.upscaleSharpness,
+                      PARAM_MIN_STRENGTH,
+                      PARAM_MAX_STRENGTH,
+                    )}
+                    onChange={(event) =>
+                      patchParams("repair", {
+                        upscaleSharpness: clampInt(
+                          Number(event.target.value),
+                          PARAM_MIN_STRENGTH,
+                          PARAM_MAX_STRENGTH,
+                        ),
+                      })
+                    }
+                  />
+                </label>
+              </>
+            ) : null}
           </>
         );
+      }
+      case "resolution-transform":
+      {
+        const candidatePaths =
+          overrideCandidatePaths.length > 0
+            ? overrideCandidatePaths
+            : inputPaths;
+        const globalTargetWidth = clampInt(
+          selectedParams.targetWidth,
+          RESOLUTION_MIN_EDGE,
+          RESOLUTION_MAX_EDGE,
+        );
+        const globalTargetHeight = clampInt(
+          selectedParams.targetHeight,
+          RESOLUTION_MIN_EDGE,
+          RESOLUTION_MAX_EDGE,
+        );
+        const sharpness = clampInt(
+          selectedParams.upscaleSharpness,
+          PARAM_MIN_STRENGTH,
+          PARAM_MAX_STRENGTH,
+        );
+        const fileOverrides =
+          (selectedParams.fileOverrides as ResolutionFileOverrideMap | undefined) ?? {};
+
+        const setFileOverrideEnabled = (path: string, enabled: boolean) => {
+          const nextOverrides = { ...fileOverrides };
+
+          if (!enabled) {
+            delete nextOverrides[path];
+          } else {
+            nextOverrides[path] = {
+              targetWidth: globalTargetWidth,
+              targetHeight: globalTargetHeight,
+            };
+          }
+
+          patchParams("resolution-transform", {
+            fileOverrides: nextOverrides,
+          });
+        };
+
+        const patchFileOverride = (
+          path: string,
+          patch: { targetWidth?: number; targetHeight?: number },
+        ) => {
+          const current = fileOverrides[path] ?? {
+            targetWidth: globalTargetWidth,
+            targetHeight: globalTargetHeight,
+          };
+
+          patchParams("resolution-transform", {
+            fileOverrides: {
+              ...fileOverrides,
+              [path]: {
+                targetWidth: clampInt(
+                  patch.targetWidth ?? current.targetWidth,
+                  RESOLUTION_MIN_EDGE,
+                  RESOLUTION_MAX_EDGE,
+                ),
+                targetHeight: clampInt(
+                  patch.targetHeight ?? current.targetHeight,
+                  RESOLUTION_MIN_EDGE,
+                  RESOLUTION_MAX_EDGE,
+                ),
+              },
+            },
+          });
+        };
+
+        return (
+          <>
+                  <label className="field">
+                    <span>目标宽度 (1-16384)</span>
+                    <input
+                      type="number"
+                      min={RESOLUTION_MIN_EDGE}
+                      max={RESOLUTION_MAX_EDGE}
+                      disabled={isRunning}
+                      value={globalTargetWidth}
+                      onChange={(event) =>
+                        patchParams("resolution-transform", {
+                          targetWidth: clampInt(
+                            Number(event.target.value),
+                            RESOLUTION_MIN_EDGE,
+                            RESOLUTION_MAX_EDGE,
+                          ),
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>目标高度 (1-16384)</span>
+                    <input
+                      type="number"
+                      min={RESOLUTION_MIN_EDGE}
+                      max={RESOLUTION_MAX_EDGE}
+                      disabled={isRunning}
+                      value={globalTargetHeight}
+                      onChange={(event) =>
+                        patchParams("resolution-transform", {
+                          targetHeight: clampInt(
+                            Number(event.target.value),
+                            RESOLUTION_MIN_EDGE,
+                            RESOLUTION_MAX_EDGE,
+                          ),
+                        })
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>超分锐化强度 (1-100)</span>
+                    <input
+                      type="number"
+                      min={PARAM_MIN_STRENGTH}
+                      max={PARAM_MAX_STRENGTH}
+                      disabled={isRunning}
+                      value={sharpness}
+                      onChange={(event) =>
+                        patchParams("resolution-transform", {
+                          upscaleSharpness: clampInt(
+                            Number(event.target.value),
+                            PARAM_MIN_STRENGTH,
+                            PARAM_MAX_STRENGTH,
+                          ),
+                        })
+                      }
+                    />
+                  </label>
+                  <p className="hint">
+                    PNG：当目标比例与图像主体比例不同，会透明居中填充到目标分辨率。JPG/WEBP：始终保持原图比例并适配到目标框内。
+                  </p>
+
+                  <section className="input-list resolution-override-list">
+                    <h3>单文件目标分辨率（可选）</h3>
+                    {isLoadingOverrideCandidates ? (
+                      <p className="muted">正在加载本次批处理图片列表...</p>
+                    ) : null}
+                    {overrideCandidatesError ? (
+                      <p className="error-inline">{overrideCandidatesError}</p>
+                    ) : null}
+                    {candidatePaths.length === 0 ? (
+                      <p className="muted">先选择输入文件后可为每个文件单独设置目标分辨率。</p>
+                    ) : (
+                      <ul className="resolution-override-items">
+                        {candidatePaths.map((path) => {
+                          const override = fileOverrides[path];
+                          const enabled = Boolean(override);
+                          const targetWidth = clampInt(
+                            override?.targetWidth ?? globalTargetWidth,
+                            RESOLUTION_MIN_EDGE,
+                            RESOLUTION_MAX_EDGE,
+                          );
+                          const targetHeight = clampInt(
+                            override?.targetHeight ?? globalTargetHeight,
+                            RESOLUTION_MIN_EDGE,
+                            RESOLUTION_MAX_EDGE,
+                          );
+
+                          return (
+                            <li key={path} className="resolution-override-item">
+                              <label className="inline-checkbox resolution-override-toggle">
+                                <input
+                                  type="checkbox"
+                                  checked={enabled}
+                                  disabled={isRunning}
+                                  onChange={(event) =>
+                                    setFileOverrideEnabled(path, event.target.checked)
+                                  }
+                                />
+                                <span className="resolution-override-path">{path}</span>
+                              </label>
+                              <div className="resolution-override-controls">
+                                <label className="field">
+                                  <span>目标宽度</span>
+                                  <input
+                                    type="number"
+                                    min={RESOLUTION_MIN_EDGE}
+                                    max={RESOLUTION_MAX_EDGE}
+                                    disabled={isRunning || !enabled}
+                                    value={targetWidth}
+                                    onChange={(event) =>
+                                      patchFileOverride(path, {
+                                        targetWidth: clampInt(
+                                          Number(event.target.value),
+                                          RESOLUTION_MIN_EDGE,
+                                          RESOLUTION_MAX_EDGE,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                </label>
+                                <label className="field">
+                                  <span>目标高度</span>
+                                  <input
+                                    type="number"
+                                    min={RESOLUTION_MIN_EDGE}
+                                    max={RESOLUTION_MAX_EDGE}
+                                    disabled={isRunning || !enabled}
+                                    value={targetHeight}
+                                    onChange={(event) =>
+                                      patchFileOverride(path, {
+                                        targetHeight: clampInt(
+                                          Number(event.target.value),
+                                          RESOLUTION_MIN_EDGE,
+                                          RESOLUTION_MAX_EDGE,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                </label>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </section>
+          </>
+        );
+      }
       default:
         return <p className="muted">该功能暂未定义参数。</p>;
     }
@@ -353,7 +888,7 @@ export default function App() {
         <div>
           <h1>Art Tool</h1>
           <p>
-            批量图像处理桌面工具。当前可用功能：PNG 透明边缘裁剪；已预留格式转换、压缩、修复扩展位。
+            批量图像处理桌面工具。当前可用功能：透明边缘裁剪、图像格式转换、图像压缩、图像修复（去噪/划痕修复/低分辨率增强）、变换分辨率（缩放/超分与按格式差异处理）。
           </p>
         </div>
         <div className="hero-actions">
@@ -387,6 +922,18 @@ export default function App() {
           onOutputDirChange={setOutputDir}
           onIncludeSubdirectoriesChange={setIncludeSubdirectories}
           onMaxConcurrencyChange={setMaxConcurrency}
+        />
+
+        <FileInspectorPanel
+          inputPaths={inputPaths}
+          outputItems={outputItems}
+          selectedInputPath={selectedInputPath}
+          selectedOutputPath={selectedOutputPath}
+          inspectedInfo={inspectedInfo}
+          isInspecting={isInspecting}
+          inspectError={inspectError}
+          onSelectInputPath={handleSelectInputPath}
+          onSelectOutputPath={handleSelectOutputPath}
         />
 
         <TaskQueuePanel

@@ -3,7 +3,9 @@ import { invoke } from "@tauri-apps/api/tauri";
 import type {
   BatchJobReport,
   BatchProgressPayload,
+  PathImageInfo,
   ProcessorDescriptor,
+  ProcessorId,
   StartBatchJobRequest,
 } from "../types";
 
@@ -23,6 +25,24 @@ export async function cancelBatchJob(jobId: string): Promise<void> {
 
 export async function openPathInSystem(path: string): Promise<void> {
   await invoke("open_path_in_system", { path });
+}
+
+export async function getPathImageInfo(path: string): Promise<PathImageInfo> {
+  return invoke<PathImageInfo>("get_path_image_info", { path });
+}
+
+export async function previewDiscoveredFiles(
+  processorId: ProcessorId,
+  inputPaths: string[],
+  includeSubdirectories: boolean,
+): Promise<string[]> {
+  return invoke<string[]>("preview_discovered_files", {
+    request: {
+      processorId,
+      inputPaths,
+      includeSubdirectories,
+    },
+  });
 }
 
 export async function listenBatchProgress(
