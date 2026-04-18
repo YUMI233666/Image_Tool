@@ -32,7 +32,11 @@
     "bundle": {
       "active": true,
       "targets": "all",
-      "identifier": "com.arttool.app"
+      "identifier": "com.arttool.app",
+      "useLocalToolsDir": true,
+      "icon": [
+        "icons/icon.ico"
+      ]
     },
     "windows": [
       {
