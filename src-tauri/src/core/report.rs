@@ -5,10 +5,23 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum BatchItemStatus {
+  Running,
   Success,
   Failed,
   Skipped,
   Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchStepReport {
+  pub step_index: u32,
+  pub step_total: u32,
+  pub processor_id: String,
+  pub status: BatchItemStatus,
+  pub message: String,
+  pub output_path: Option<String>,
+  pub duration_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,6 +32,8 @@ pub struct BatchItemReport {
   pub status: BatchItemStatus,
   pub message: String,
   pub duration_ms: u64,
+  #[serde(default)]
+  pub steps: Vec<BatchStepReport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,9 +74,10 @@ pub fn write_report_to_file(
   report: &BatchJobReport,
   output_dir: &Path,
 ) -> Result<PathBuf, ProcessError> {
-  std::fs::create_dir_all(output_dir)?;
+  let report_dir = output_dir.join(".art-tool-tmp").join("reports");
+  std::fs::create_dir_all(&report_dir)?;
 
-  let report_path = output_dir.join(format!("batch-report-{}.json", report.job_id));
+  let report_path = report_dir.join(format!("batch-report-{}.json", report.job_id));
   let payload = serde_json::to_string_pretty(report)?;
   std::fs::write(&report_path, payload)?;
 

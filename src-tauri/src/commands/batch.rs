@@ -1,5 +1,10 @@
-use crate::core::batch_job_runner::{run_batch_job, BatchJobRequest};
+use crate::core::batch_job_runner::{
+  run_batch_job,
+  BatchJobRequest,
+  WorkflowStepRequest,
+};
 use crate::core::file_discovery::discover_files;
+use crate::core::output_resolver::RenameConfig;
 use crate::core::processor::ProcessorDescriptor;
 use crate::core::registry::ProcessorRegistry;
 use crate::core::report::{write_report_to_file, BatchJobReport};
@@ -24,6 +29,10 @@ pub struct StartBatchJobRequest {
   pub output_dir: String,
   #[serde(default)]
   pub params: Option<Value>,
+  #[serde(default)]
+  pub workflow_steps: Option<Vec<WorkflowStepRequest>>,
+  #[serde(default)]
+  pub rename_config: Option<RenameConfig>,
   #[serde(default)]
   pub max_concurrency: Option<usize>,
   #[serde(default)]
@@ -113,6 +122,8 @@ pub async fn start_batch_job(
     input_paths: request.input_paths.iter().map(PathBuf::from).collect(),
     output_dir: PathBuf::from(&request.output_dir),
     params: request.params.unwrap_or(Value::Null),
+    workflow_steps: request.workflow_steps.unwrap_or_default(),
+    rename_config: request.rename_config,
     max_concurrency: request.max_concurrency,
     include_subdirectories,
   };

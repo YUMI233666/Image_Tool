@@ -1,6 +1,6 @@
 [package]
 name = "art_tool"
-version = "0.1.0"
+version = "1.1.0"
 description = "Desktop batch image processing tool"
 authors = ["art-tool"]
 license = "MIT"

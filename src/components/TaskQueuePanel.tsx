@@ -70,9 +70,20 @@ export default function TaskQueuePanel({
           <p>
             当前文件: <span>{progress.currentFile || "(等待中)"}</span>
           </p>
+          {progress.currentStepProcessorId ? (
+            <p>
+              当前步骤: <span>{progress.currentStepProcessorId}</span>
+              {progress.currentStepIndex && progress.currentStepTotal
+                ? `（${progress.currentStepIndex}/${progress.currentStepTotal}）`
+                : ""}
+            </p>
+          ) : null}
           <p>
             状态: <span>{progress.status}</span>
           </p>
+          {progress.currentStepMessage ? (
+            <p className="hint">步骤信息: {progress.currentStepMessage}</p>
+          ) : null}
           <p className="hint">{progress.message}</p>
         </div>
       ) : null}

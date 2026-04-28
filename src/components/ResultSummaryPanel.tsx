@@ -60,11 +60,20 @@ export default function ResultSummaryPanel({
                 {report.items
                   .filter((item) => item.status === "failed")
                   .slice(0, 5)
-                  .map((item) => (
-                    <li key={`${item.inputPath}-${item.durationMs}`}>
-                      {item.inputPath} - {item.message}
-                    </li>
-                  ))}
+                  .map((item) => {
+                    const failedStep = item.steps?.find(
+                      (step) => step.status === "failed",
+                    );
+
+                    return (
+                      <li key={`${item.inputPath}-${item.durationMs}`}>
+                        {item.inputPath} -
+                        {failedStep
+                          ? ` [${failedStep.processorId}] ${failedStep.message}`
+                          : ` ${item.message}`}
+                      </li>
+                    );
+                  })}
               </ul>
             </div>
           ) : (

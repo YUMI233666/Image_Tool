@@ -1,6 +1,6 @@
 # Processor 接口规范
 
-本文档用于约束 Art Tool 的处理器扩展接入方式，适用于图像格式转换、图像压缩、图像修复、分辨率变换等后续功能。
+本文档用于约束 Art Tool 的处理器扩展接入方式，适用于图像格式转换、图像压缩、图像修复、分辨率变换与批量重命名等功能。
 
 ## 目标
 - 保证新功能可被统一调度。
@@ -24,6 +24,38 @@
 - 图像压缩：quality、mode（lossy/lossless/balanced）。
 - 图像修复：mode（auto/denoise/scratch/upscale）、strength、upscaleFactor（2-4，仅 upscale 模式生效）、upscaleSharpness（1-100，仅 upscale 模式生效）。
 - 变换分辨率：targetWidth、targetHeight、upscaleSharpness（1-100）、fileOverrides（按输入路径覆盖目标分辨率）。
+- 批量重命名：由批处理请求的 renameConfig 提供规则（见下方工作流与命名规则）。
+
+## 工作流与重命名规则
+
+批处理请求支持两种模式：
+
+1. 快捷模式（单处理器）：
+	- 使用 processorId + params 直接运行。
+2. 工作流模式（多步骤）：
+	- 使用 workflowSteps 依序执行多个处理器。
+
+### 工作流步骤结构
+
+- workflowSteps: Array<WorkflowStep>
+  - stepId: string
+  - processorId: string
+  - params: object
+
+处理器依旧是“单文件处理逻辑”，工作流只是对单文件执行多个处理器的编排。
+
+### 重命名规则
+
+批处理请求支持 renameConfig：
+
+- enabled: bool
+- mode: custom | template
+- customName?: string
+- template?: string
+- startIndex?: number (默认 1)
+- indexPadding?: number (默认 0)
+
+模板变量：{name} {index} {date} {time} {ext}
 
 ## 错误处理规范
 - 参数错误：返回 Validation。

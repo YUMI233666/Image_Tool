@@ -2,6 +2,7 @@ use crate::core::processor::{Processor, ProcessorDescriptor};
 use crate::core::processors::{
   compress::CompressProcessor,
   format_convert::FormatConvertProcessor,
+  rename::RenameProcessor,
   repair::RepairProcessor,
   resolution_transform::ResolutionTransformProcessor,
   trim_transparent::TrimTransparentProcessor,
@@ -53,6 +54,7 @@ impl ProcessorRegistry {
     registry.register(CompressProcessor::default());
     registry.register(RepairProcessor::default());
     registry.register(ResolutionTransformProcessor::default());
+    registry.register(RenameProcessor::default());
     registry
   }
 }

@@ -3,7 +3,12 @@ export type ProcessorId =
   | "format-convert"
   | "compress"
   | "repair"
-  | "resolution-transform";
+  | "resolution-transform"
+  | "rename";
+
+export type RunMode = "quick" | "workflow";
+
+export type RenameMode = "custom" | "template";
 
 export type ItemStatus = "success" | "failed" | "skipped" | "cancelled" | "running";
 
@@ -19,9 +24,36 @@ export interface StartBatchJobRequest {
   inputPaths: string[];
   outputDir: string;
   params: Record<string, unknown>;
+  workflowSteps?: WorkflowStepRequest[];
+  renameConfig?: RenameConfig;
   maxConcurrency?: number;
   includeSubdirectories?: boolean;
   writeReport?: boolean;
+}
+
+export interface WorkflowStepRequest {
+  stepId: string;
+  processorId: ProcessorId;
+  params: Record<string, unknown>;
+}
+
+export interface RenameConfig {
+  enabled: boolean;
+  mode: RenameMode;
+  customName?: string;
+  template?: string;
+  startIndex?: number;
+  indexPadding?: number;
+}
+
+export interface BatchStepReport {
+  stepIndex: number;
+  stepTotal: number;
+  processorId: string;
+  status: ItemStatus;
+  message: string;
+  outputPath?: string;
+  durationMs: number;
 }
 
 export interface BatchItemReport {
@@ -30,11 +62,12 @@ export interface BatchItemReport {
   status: ItemStatus;
   message: string;
   durationMs: number;
+  steps?: BatchStepReport[];
 }
 
 export interface BatchJobReport {
   jobId: string;
-  processorId: ProcessorId;
+  processorId: ProcessorId | "workflow";
   startedAt: string;
   finishedAt: string;
   total: number;
@@ -57,6 +90,10 @@ export interface BatchProgressPayload {
   currentFile: string;
   status: ItemStatus;
   message: string;
+  currentStepProcessorId?: string;
+  currentStepIndex?: number;
+  currentStepTotal?: number;
+  currentStepMessage?: string;
 }
 
 export interface PathImageInfo {

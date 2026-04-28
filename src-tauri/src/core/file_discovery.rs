@@ -1,12 +1,12 @@
 use crate::core::processor::ProcessError;
-use std::collections::BTreeSet;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 fn supported_extensions(processor_id: &str) -> &'static [&'static str] {
   match processor_id {
     "trim-transparent" => &["png"],
-    "format-convert" | "compress" | "repair" | "resolution-transform" => {
+    "format-convert" | "compress" | "repair" | "resolution-transform" | "rename" => {
       &["png", "jpg", "jpeg", "webp", "bmp", "tiff"]
     }
     _ => &["png"],
@@ -34,7 +34,7 @@ pub fn discover_files(
   }
 
   let extensions = supported_extensions(processor_id);
-  let mut files = BTreeSet::new();
+  let mut files = HashSet::new();
 
   for input in input_paths {
     if input.is_file() {
@@ -69,5 +69,7 @@ pub fn discover_files(
     ));
   }
 
-  Ok(files.into_iter().collect())
+  let mut list = files.into_iter().collect::<Vec<_>>();
+  list.sort();
+  Ok(list)
 }
