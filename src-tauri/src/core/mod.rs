@@ -5,3 +5,4 @@ pub mod processor;
 pub mod processors;
 pub mod registry;
 pub mod report;
+pub mod upscale_runner;

@@ -62,6 +62,12 @@ const fallbackProcessors: ProcessorDescriptor[] = [
     enabled: true,
     notes: "仅修改输出文件名，不改变图片内容。",
   },
+  {
+    id: "upscale-anime",
+    displayName: "二次元超分",
+    enabled: true,
+    notes: "适合赛璐珞/伪厚涂风格的 AI 超分，可调降噪等级。",
+  },
 ];
 
 const INSPECT_LOADING_DELAY_MS = 180;
@@ -980,6 +986,50 @@ export default function App() {
           </>
         );
       }
+      case "upscale-anime":
+      {
+        const scaleValue = clampInt(selectedParams.scale, 2, 4);
+        const denoiseValue = clampInt(selectedParams.denoiseLevel, 1, 3);
+
+        return (
+          <>
+            <label className="field">
+              <span>倍率</span>
+              <select
+                value={String(scaleValue === 4 ? 4 : 2)}
+                onChange={(event) =>
+                  patchCurrentParams("upscale-anime", {
+                    scale: Number(event.target.value) === 4 ? 4 : 2,
+                  })
+                }
+                disabled={isRunning}
+              >
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>降噪等级 (1-3)</span>
+              <select
+                value={String(denoiseValue)}
+                onChange={(event) =>
+                  patchCurrentParams("upscale-anime", {
+                    denoiseLevel: clampInt(Number(event.target.value), 1, 3),
+                  })
+                }
+                disabled={isRunning}
+              >
+                <option value="1">1（厚涂保留笔触）</option>
+                <option value="2">2（厚涂/半厚涂）</option>
+                <option value="3">3（赛璐珞/伪厚涂）</option>
+              </select>
+            </label>
+            <p className="hint">
+              建议：赛璐珞/伪厚涂使用 3；厚涂可降低到 1-2 以保留笔触。
+            </p>
+          </>
+        );
+      }
       case "rename":
         return (
           <p className="muted">
@@ -997,7 +1047,7 @@ export default function App() {
         <div>
           <h1>Art Tool</h1>
           <p>
-            批量图像处理桌面工具。支持快捷模式与工作流模式，现可进行步骤编排执行与批量重命名（自定义/模板）。
+            批量图像处理桌面工具。支持快捷模式与工作流模式，提供二次元超分、批量重命名与步骤编排能力。
           </p>
         </div>
         <div className="hero-actions">

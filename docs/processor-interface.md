@@ -1,6 +1,6 @@
 # Processor 接口规范
 
-本文档用于约束 Art Tool 的处理器扩展接入方式，适用于图像格式转换、图像压缩、图像修复、分辨率变换与批量重命名等功能。
+本文档用于约束 Art Tool 的处理器扩展接入方式，适用于图像格式转换、图像压缩、图像修复、分辨率变换、批量重命名与二次元超分等功能。
 
 ## 目标
 - 保证新功能可被统一调度。
@@ -25,6 +25,7 @@
 - 图像修复：mode（auto/denoise/scratch/upscale）、strength、upscaleFactor（2-4，仅 upscale 模式生效）、upscaleSharpness（1-100，仅 upscale 模式生效）。
 - 变换分辨率：targetWidth、targetHeight、upscaleSharpness（1-100）、fileOverrides（按输入路径覆盖目标分辨率）。
 - 批量重命名：由批处理请求的 renameConfig 提供规则（见下方工作流与命名规则）。
+- 二次元超分：scale（2/4）、denoiseLevel（1-3，默认 3）。
 
 ## 工作流与重命名规则
 
@@ -56,6 +57,15 @@
 - indexPadding?: number (默认 0)
 
 模板变量：{name} {index} {date} {time} {ext}
+
+## 二次元超分（Sidecar 约定）
+
+- 处理器 ID: upscale-anime
+- 依赖 sidecar: realcugan-ncnn-vulkan
+- 模型目录: models-se（与 sidecar 同目录）
+- 推荐参数:
+  - 赛璐珞/伪厚涂：denoiseLevel=3
+  - 厚涂：denoiseLevel=1-2
 
 ## 错误处理规范
 - 参数错误：返回 Validation。

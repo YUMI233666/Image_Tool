@@ -4,3 +4,4 @@ pub mod rename;
 pub mod repair;
 pub mod resolution_transform;
 pub mod trim_transparent;
+pub mod upscale_anime;

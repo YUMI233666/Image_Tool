@@ -7,6 +7,12 @@ import type {
   ProcessorDescriptor,
   ProcessorId,
   StartBatchJobRequest,
+  UpscaleAnimeRequest,
+  UpscaleAnimeResponse,
+  UpscaleCompletePayload,
+  UpscaleErrorPayload,
+  UpscaleProgressPayload,
+  UpscaleStartPayload,
 } from "../types";
 
 export async function listProcessors(): Promise<ProcessorDescriptor[]> {
@@ -45,6 +51,12 @@ export async function previewDiscoveredFiles(
   });
 }
 
+export async function upscaleAnime(
+  request: UpscaleAnimeRequest,
+): Promise<UpscaleAnimeResponse> {
+  return invoke<UpscaleAnimeResponse>("upscale_anime", { request });
+}
+
 export async function listenBatchProgress(
   callback: (payload: BatchProgressPayload) => void,
 ): Promise<() => void> {
@@ -64,6 +76,60 @@ export async function listenBatchComplete(
   callback: (payload: BatchJobReport) => void,
 ): Promise<() => void> {
   const unlisten = await listen<BatchJobReport>("batch-complete", (event) => {
+    if (event.payload) {
+      callback(event.payload);
+    }
+  });
+
+  return unlisten;
+}
+
+export async function listenUpscaleStart(
+  callback: (payload: UpscaleStartPayload) => void,
+): Promise<() => void> {
+  const unlisten = await listen<UpscaleStartPayload>("upscale-start", (event) => {
+    if (event.payload) {
+      callback(event.payload);
+    }
+  });
+
+  return unlisten;
+}
+
+export async function listenUpscaleProgress(
+  callback: (payload: UpscaleProgressPayload) => void,
+): Promise<() => void> {
+  const unlisten = await listen<UpscaleProgressPayload>(
+    "upscale-progress",
+    (event) => {
+      if (event.payload) {
+        callback(event.payload);
+      }
+    },
+  );
+
+  return unlisten;
+}
+
+export async function listenUpscaleComplete(
+  callback: (payload: UpscaleCompletePayload) => void,
+): Promise<() => void> {
+  const unlisten = await listen<UpscaleCompletePayload>(
+    "upscale-complete",
+    (event) => {
+      if (event.payload) {
+        callback(event.payload);
+      }
+    },
+  );
+
+  return unlisten;
+}
+
+export async function listenUpscaleError(
+  callback: (payload: UpscaleErrorPayload) => void,
+): Promise<() => void> {
+  const unlisten = await listen<UpscaleErrorPayload>("upscale-error", (event) => {
     if (event.payload) {
       callback(event.payload);
     }

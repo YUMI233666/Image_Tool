@@ -4,7 +4,8 @@ export type ProcessorId =
   | "compress"
   | "repair"
   | "resolution-transform"
-  | "rename";
+  | "rename"
+  | "upscale-anime";
 
 export type RunMode = "quick" | "workflow";
 
@@ -107,4 +108,34 @@ export interface PathImageInfo {
   imageFormat?: string;
   colorType?: string;
   message?: string;
+}
+
+export interface UpscaleAnimeRequest {
+  inputPath: string;
+  outputPath: string;
+  scale: number;
+  denoiseLevel: number;
+}
+
+export interface UpscaleAnimeResponse {
+  outputPath: string;
+}
+
+export interface UpscaleStartPayload {
+  input: string;
+}
+
+export interface UpscaleProgressPayload {
+  input: string;
+  status: "processing";
+}
+
+export interface UpscaleCompletePayload {
+  input: string;
+  output: string;
+}
+
+export interface UpscaleErrorPayload {
+  input: string;
+  error: string;
 }

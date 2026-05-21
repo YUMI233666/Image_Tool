@@ -6,6 +6,7 @@ use crate::core::processors::{
   repair::RepairProcessor,
   resolution_transform::ResolutionTransformProcessor,
   trim_transparent::TrimTransparentProcessor,
+  upscale_anime::UpscaleAnimeProcessor,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -55,6 +56,7 @@ impl ProcessorRegistry {
     registry.register(RepairProcessor::default());
     registry.register(ResolutionTransformProcessor::default());
     registry.register(RenameProcessor::default());
+    registry.register(UpscaleAnimeProcessor::default());
     registry
   }
 }

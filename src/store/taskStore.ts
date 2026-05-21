@@ -69,6 +69,7 @@ const defaultParams: Record<ProcessorId, Record<string, unknown>> = {
     fileOverrides: {},
   },
   rename: {},
+  "upscale-anime": { scale: 2, denoiseLevel: 3 },
 };
 
 const defaultRenameConfig: RenameConfig = {

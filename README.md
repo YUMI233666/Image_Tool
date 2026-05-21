@@ -9,6 +9,10 @@ Art Tool 是一个面向 Windows 的桌面端批量图像处理工具，支持�
 - 想批量处理图片的普通用户。
 - 想在本地运行、调试或二次开发的开发者。
 
+## 截图
+
+（待补充截图）
+
 ## 功能总览
 
 - 裁剪透明边缘（Trim Transparent）
@@ -31,6 +35,9 @@ Art Tool 是一个面向 Windows 的桌面端批量图像处理工具，支持�
 - 批量重命名（Rename）
   - 支持自定义命名与模板命名。
   - 模板变量：{name} {index} {date} {time} {ext}。
+- 二次元超分（Anime Upscale）
+  - 基于 realcugan-ncnn-vulkan sidecar 的二次元风格超分。
+  - 支持倍率 2x/4x 与降噪等级 1-3（默认 3）。
 - 工作流编排（Workflow）
   - 可添加多个处理步骤并按顺序执行。
   - 支持步骤级进度与失败定位。
@@ -66,6 +73,7 @@ Art Tool 是一个面向 Windows 的桌面端批量图像处理工具，支持�
 - npm 11+
 - Rust stable（包含 cargo）
 - WebView2（Windows 一般已内置）
+- 支持 Vulkan 的显卡驱动（用于二次元超分）
 
 ### 2. 克隆仓库
 
@@ -78,6 +86,20 @@ cd Image_Tool
 
 ```bash
 npm install
+```
+
+### 3.1 下载二次元超分模型（可选但推荐）
+
+Windows：
+
+```bat
+download-models.bat
+```
+
+Mac/Linux：
+
+```bash
+bash download-models.sh
 ```
 
 ### 4. 启动桌面应用（开发模式）
@@ -98,12 +120,13 @@ npm.cmd run tauri:dev
 2. 快捷模式：在“功能选择”中选处理功能；工作流模式：在“工作流编排”中添加步骤并选择处理器。
 3. 在“参数设置”中配置当前步骤/功能参数。
 4. （可选）在“批量重命名”面板启用命名规则。
-5. 在“批处理输入”中选择输入文件或输入文件夹。
-6. 选择输出目录。
-7. 设置是否递归子目录、最大并发数。
-8. 点击“开始处理”。
-9. 在“任务队列”查看进度，在“结果汇总”查看成功/失败统计。
-10. 需要时打开输出目录或报告文件。
+5. （可选）若使用“二次元超分”，在参数区选择倍率与降噪等级（赛璐珞/伪厚涂建议 3，厚涂建议 1-2）。
+6. 在“批处理输入”中选择输入文件或输入文件夹。
+7. 选择输出目录。
+8. 设置是否递归子目录、最大并发数。
+9. 点击“开始处理”。
+10. 在“任务队列”查看进度，在“结果汇总”查看成功/失败统计。
+11. 需要时打开输出目录或报告文件。
 
 ## 输出与报告说明
 
@@ -113,6 +136,45 @@ npm.cmd run tauri:dev
   - 每个文件的处理结果和消息
   - 开始/结束时间与耗时信息
 - 报告路径：输出目录/.art-tool-tmp/reports/batch-report-<jobId>.json
+
+## 二次元超分（模型放置）
+
+1. 下载 realcugan-ncnn-vulkan 可执行文件与 models-se 模型。
+2. 放置到以下目录结构：
+
+```
+src-tauri/
+  binaries/
+    realcugan-ncnn-vulkan.exe
+    models-se/
+      up2x-conservative.bin
+      ...
+```
+
+说明：模型目录使用相对路径 `models-se`，与 sidecar 同目录。
+
+### 下载 models-se（脚本推荐）
+
+Windows：
+
+```bat
+download-models.bat
+```
+
+Mac/Linux：
+
+```bash
+bash download-models.sh
+```
+
+说明：脚本会从 Real-CUGAN 的最新 Release 里自动下载 models-se 压缩包并解压到 `src-tauri/binaries/models-se`。
+如果下载到的是 `.7z`，请先安装 7-Zip（Windows）或 p7zip（Mac/Linux）。
+
+### 下载 models-se（手动）
+
+1. 打开 Real-CUGAN release 页面。
+2. 下载 models-se 压缩包。
+3. 解压后将 models-se 目录放入 `src-tauri/binaries/`。
 
 ## 常用命令
 

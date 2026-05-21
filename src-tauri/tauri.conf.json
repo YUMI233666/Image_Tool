@@ -34,6 +34,8 @@
       "targets": "all",
       "identifier": "com.arttool.app",
       "useLocalToolsDir": true,
+      "externalBin": ["binaries/realcugan-ncnn-vulkan"],
+      "resources": ["binaries/models-se/*"],
       "icon": [
         "icons/icon.ico"
       ]

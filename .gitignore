@@ -1,7 +1,12 @@
 # Dependencies and build outputs
 node_modules/
 dist/
+build/
 src-tauri/target/
+src-tauri/binaries/
+binaries/
+Art-Tool-*.zip
+Art-Tool-*.zip.sha256
 
 # Logs
 *.log

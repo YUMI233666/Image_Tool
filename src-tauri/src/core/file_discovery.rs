@@ -6,7 +6,12 @@ use walkdir::WalkDir;
 fn supported_extensions(processor_id: &str) -> &'static [&'static str] {
   match processor_id {
     "trim-transparent" => &["png"],
-    "format-convert" | "compress" | "repair" | "resolution-transform" | "rename" => {
+    "format-convert"
+    | "compress"
+    | "repair"
+    | "resolution-transform"
+    | "rename"
+    | "upscale-anime" => {
       &["png", "jpg", "jpeg", "webp", "bmp", "tiff"]
     }
     _ => &["png"],
