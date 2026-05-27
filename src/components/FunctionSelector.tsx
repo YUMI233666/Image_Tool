@@ -18,7 +18,7 @@ export default function FunctionSelector({
     <section className="panel">
       <h2>功能选择</h2>
       <p className="muted">
-        当前版本可用：透明边缘裁剪、图像格式转换、图像压缩、图像修复、变换分辨率、二次元超分、批量重命名。
+        当前版本可用：透明边缘裁剪、手动裁剪、图像格式转换、图像压缩、图像修复、变换分辨率、二次元超分、批量重命名。
       </p>
 
       <label className="field">

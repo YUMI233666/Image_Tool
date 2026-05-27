@@ -15,6 +15,7 @@ interface WorkflowBuilderProps {
   onRemoveStep: (stepId: string) => void;
   onMoveStep: (stepId: string, direction: "up" | "down") => void;
   onChangeStepProcessor: (stepId: string, processorId: ProcessorId) => void;
+  onToggleStepEnabled: (stepId: string, enabled: boolean) => void;
 }
 
 const fallbackProcessorId: ProcessorId = "trim-transparent";
@@ -29,6 +30,7 @@ export default function WorkflowBuilder({
   onRemoveStep,
   onMoveStep,
   onChangeStepProcessor,
+  onToggleStepEnabled,
 }: WorkflowBuilderProps) {
   const enabledProcessors = useMemo(
     () => processors.filter((item) => item.enabled),
@@ -66,6 +68,7 @@ export default function WorkflowBuilder({
         <ul className="workflow-step-list">
           {steps.map((step, index) => {
             const selected = activeStepId === step.stepId;
+            const disabled = step.enabled === false;
             const currentProcessor =
               processors.find((item) => item.id === step.processorId) ??
               processors[0];
@@ -73,7 +76,7 @@ export default function WorkflowBuilder({
             return (
               <li
                 key={step.stepId}
-                className={`workflow-step-item${selected ? " is-selected" : ""}`}
+                className={`workflow-step-item${selected ? " is-selected" : ""}${disabled ? " is-disabled" : ""}`}
               >
                 <button
                   type="button"
@@ -86,6 +89,17 @@ export default function WorkflowBuilder({
                 </button>
 
                 <div className="workflow-step-actions">
+                  <label className="inline-checkbox workflow-step-toggle">
+                    <input
+                      type="checkbox"
+                      checked={step.enabled ?? true}
+                      onChange={(event) =>
+                        onToggleStepEnabled(step.stepId, event.target.checked)
+                      }
+                      disabled={isRunning}
+                    />
+                    <span>启用</span>
+                  </label>
                   <select
                     value={step.processorId}
                     onChange={(event) =>

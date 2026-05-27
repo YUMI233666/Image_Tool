@@ -5,7 +5,8 @@ export type ProcessorId =
   | "repair"
   | "resolution-transform"
   | "rename"
-  | "upscale-anime";
+  | "upscale-anime"
+  | "manual-crop";
 
 export type RunMode = "quick" | "workflow";
 
@@ -35,6 +36,7 @@ export interface StartBatchJobRequest {
 export interface WorkflowStepRequest {
   stepId: string;
   processorId: ProcessorId;
+  enabled?: boolean;
   params: Record<string, unknown>;
 }
 
@@ -136,6 +138,64 @@ export interface UpscaleCompletePayload {
 }
 
 export interface UpscaleErrorPayload {
+  input: string;
+  error: string;
+}
+
+export type CropApplyMode = "absolute" | "percent";
+
+export interface CropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface CropPercentRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ManualCropFileOverride {
+  skip?: boolean;
+  rect?: CropRect;
+  percentRect?: CropPercentRect;
+}
+
+export interface ManualCropParams {
+  applyMode: CropApplyMode;
+  defaultRect?: CropRect;
+  defaultPercentRect?: CropPercentRect;
+  fileOverrides: Record<string, ManualCropFileOverride>;
+  aspectRatio?: string;
+  viewMode?: "fit" | "actual";
+}
+
+export interface CropImageRequest {
+  inputPath: string;
+  outputPath: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface CropImageResponse {
+  outputPath: string;
+}
+
+export interface CropStartPayload {
+  input: string;
+}
+
+export interface CropCompletePayload {
+  input: string;
+  output: string;
+}
+
+export interface CropErrorPayload {
   input: string;
   error: string;
 }

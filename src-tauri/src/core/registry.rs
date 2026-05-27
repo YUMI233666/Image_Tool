@@ -2,6 +2,7 @@ use crate::core::processor::{Processor, ProcessorDescriptor};
 use crate::core::processors::{
   compress::CompressProcessor,
   format_convert::FormatConvertProcessor,
+  manual_crop::ManualCropProcessor,
   rename::RenameProcessor,
   repair::RepairProcessor,
   resolution_transform::ResolutionTransformProcessor,
@@ -57,6 +58,7 @@ impl ProcessorRegistry {
     registry.register(ResolutionTransformProcessor::default());
     registry.register(RenameProcessor::default());
     registry.register(UpscaleAnimeProcessor::default());
+    registry.register(ManualCropProcessor::default());
     registry
   }
 }

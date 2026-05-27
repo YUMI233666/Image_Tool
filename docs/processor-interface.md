@@ -26,6 +26,7 @@
 - 变换分辨率：targetWidth、targetHeight、upscaleSharpness（1-100）、fileOverrides（按输入路径覆盖目标分辨率）。
 - 批量重命名：由批处理请求的 renameConfig 提供规则（见下方工作流与命名规则）。
 - 二次元超分：scale（2/4）、denoiseLevel（1-3，默认 3）。
+- 手动裁剪：applyMode（percent/absolute）、defaultRect 或 defaultPercentRect、fileOverrides（单图 skip/rect/percentRect）。
 
 ## 工作流与重命名规则
 
@@ -41,6 +42,7 @@
 - workflowSteps: Array<WorkflowStep>
   - stepId: string
   - processorId: string
+  - enabled?: boolean (默认 true)
   - params: object
 
 处理器依旧是“单文件处理逻辑”，工作流只是对单文件执行多个处理器的编排。

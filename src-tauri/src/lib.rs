@@ -10,6 +10,7 @@ pub fn run() {
       commands::batch::cancel_batch_job,
       commands::batch::open_path_in_system,
       commands::batch::get_path_image_info,
+      commands::crop::crop_image,
       commands::upscale::upscale_anime,
     ])
     .run(tauri::generate_context!())

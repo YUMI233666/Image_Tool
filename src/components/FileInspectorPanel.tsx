@@ -1,4 +1,8 @@
-import type { BatchItemReport, PathImageInfo } from "../lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { readBinaryFile } from "@tauri-apps/api/fs";
+import { convertFileSrc } from "@tauri-apps/api/tauri";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import type { BatchItemReport, ItemStatus, PathImageInfo } from "../lib/types";
 
 interface FileInspectorPanelProps {
   inputPaths: string[];
@@ -10,6 +14,105 @@ interface FileInspectorPanelProps {
   inspectError: string;
   onSelectInputPath: (path: string) => void;
   onSelectOutputPath: (path: string) => void;
+}
+
+interface FileListItem {
+  path: string;
+  status?: ItemStatus;
+}
+
+function toFileSrc(path: string): string {
+  return convertFileSrc(path.replace(/\\/g, "/"));
+}
+
+function createImageBlobUrl(bytes: Uint8Array): string {
+  const view = new Uint8Array(bytes);
+  const blob = new Blob([view], { type: "image/*" });
+  return URL.createObjectURL(blob);
+}
+
+interface VirtualizedFileListProps {
+  items: FileListItem[];
+  selectedPath: string | null;
+  emptyLabel: string;
+  onSelect: (path: string) => void;
+  onPreview: (path: string) => void;
+  onThumbError: (path: string) => void;
+  thumbErrors: Record<string, boolean>;
+  thumbFallbacks: Record<string, string>;
+}
+
+function VirtualizedFileList({
+  items,
+  selectedPath,
+  emptyLabel,
+  onSelect,
+  onPreview,
+  onThumbError,
+  thumbErrors,
+  thumbFallbacks,
+}: VirtualizedFileListProps) {
+  const parentRef = useRef<HTMLUListElement | null>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 120,
+    overscan: 6,
+  });
+
+  if (items.length === 0) {
+    return <p className="muted">{emptyLabel}</p>;
+  }
+
+  return (
+    <ul ref={parentRef} className="selectable-list selectable-list-virtual">
+      <li className="selectable-list-spacer" style={{ height: rowVirtualizer.getTotalSize() }} />
+      {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+        const item = items[virtualRow.index];
+        const selected = selectedPath === item.path;
+        const fallbackUrl = thumbFallbacks[item.path];
+        const thumbUrl = fallbackUrl ?? toFileSrc(item.path);
+        const hasError = Boolean(thumbErrors[item.path] && !fallbackUrl);
+
+        return (
+          <li
+            key={`${item.path}-${virtualRow.index}`}
+            className="selectable-list-row"
+            ref={rowVirtualizer.measureElement}
+            data-index={virtualRow.index}
+            style={{ transform: `translateY(${virtualRow.start}px)` }}
+          >
+            <button
+              type="button"
+              className={`path-item ${selected ? "is-selected" : ""}`}
+              onClick={() => onSelect(item.path)}
+            >
+              <span className="path-item-thumb">
+                {hasError ? (
+                  <span className="thumb-placeholder">无法预览</span>
+                ) : (
+                  <img
+                    src={thumbUrl}
+                    alt="thumbnail"
+                    loading="lazy"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onPreview(item.path);
+                    }}
+                    onError={() => onThumbError(item.path)}
+                  />
+                )}
+              </span>
+              <span className="path-item-main">{item.path}</span>
+              {item.status ? (
+                <span className={`path-item-meta status-${item.status}`}>{item.status}</span>
+              ) : null}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 function formatBytes(value?: number): string {
@@ -59,7 +162,68 @@ export default function FileInspectorPanel({
   onSelectInputPath,
   onSelectOutputPath,
 }: FileInspectorPanelProps) {
+  const [thumbErrors, setThumbErrors] = useState<Record<string, boolean>>({});
+  const [thumbFallbacks, setThumbFallbacks] = useState<Record<string, string>>({});
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState(false);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+
   const outputPaths = outputItems.filter((item) => Boolean(item.outputPath));
+  const inputItems = useMemo<FileListItem[]>(
+    () => inputPaths.map((path) => ({ path })),
+    [inputPaths],
+  );
+  const outputList = useMemo<FileListItem[]>(
+    () =>
+      outputPaths.map((item) => ({
+        path: item.outputPath as string,
+        status: item.status as ItemStatus,
+      })),
+    [outputPaths],
+  );
+
+  const handleThumbError = useCallback(
+    async (path: string) => {
+      if (thumbFallbacks[path]) {
+        return;
+      }
+
+      try {
+        const bytes = await readBinaryFile(path);
+        const url = createImageBlobUrl(bytes);
+        setThumbFallbacks((prev) => ({ ...prev, [path]: url }));
+        setThumbErrors((prev) => {
+          const next = { ...prev };
+          delete next[path];
+          return next;
+        });
+      } catch {
+        setThumbErrors((prev) => ({ ...prev, [path]: true }));
+      }
+    },
+    [thumbFallbacks],
+  );
+
+  const openPreview = useCallback((path: string) => {
+    setPreviewPath(path);
+    setPreviewError(false);
+    setPreviewSrc(toFileSrc(path));
+  }, []);
+
+  const closePreview = useCallback(() => {
+    setPreviewPath(null);
+    setPreviewError(false);
+    setPreviewSrc(null);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      Object.values(thumbFallbacks).forEach((url) => URL.revokeObjectURL(url));
+      if (previewSrc && previewSrc.startsWith("blob:")) {
+        URL.revokeObjectURL(previewSrc);
+      }
+    };
+  }, [previewSrc, thumbFallbacks]);
 
   return (
     <section className="panel panel-full-width">
@@ -68,55 +232,30 @@ export default function FileInspectorPanel({
       <div className="file-lists-grid">
         <div className="file-list-box">
           <h3>添加的文件</h3>
-          {inputPaths.length === 0 ? (
-            <p className="muted">暂无输入文件，先在上方添加后可选择查看参数。</p>
-          ) : (
-            <ul className="selectable-list">
-              {inputPaths.map((path) => {
-                const selected = selectedInputPath === path;
-                return (
-                  <li key={`input-${path}`}>
-                    <button
-                      type="button"
-                      className={`path-item ${selected ? "is-selected" : ""}`}
-                      onClick={() => onSelectInputPath(path)}
-                    >
-                      <span className="path-item-main">{path}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <VirtualizedFileList
+            items={inputItems}
+            selectedPath={selectedInputPath}
+            emptyLabel="暂无输入文件，先在上方添加后可选择查看参数。"
+            onSelect={onSelectInputPath}
+            onPreview={openPreview}
+            onThumbError={handleThumbError}
+            thumbErrors={thumbErrors}
+            thumbFallbacks={thumbFallbacks}
+          />
         </div>
 
         <div className="file-list-box">
           <h3>输出文件</h3>
-          {outputPaths.length === 0 ? (
-            <p className="muted">执行处理后会在这里展示输出文件列表。</p>
-          ) : (
-            <ul className="selectable-list">
-              {outputPaths.map((item) => {
-                const outputPath = item.outputPath as string;
-                const selected = selectedOutputPath === outputPath;
-
-                return (
-                  <li key={`output-${outputPath}-${item.durationMs}`}>
-                    <button
-                      type="button"
-                      className={`path-item ${selected ? "is-selected" : ""}`}
-                      onClick={() => onSelectOutputPath(outputPath)}
-                    >
-                      <span className="path-item-main">{outputPath}</span>
-                      <span className={`path-item-meta status-${item.status}`}>
-                        {item.status}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <VirtualizedFileList
+            items={outputList}
+            selectedPath={selectedOutputPath}
+            emptyLabel="执行处理后会在这里展示输出文件列表。"
+            onSelect={onSelectOutputPath}
+            onPreview={openPreview}
+            onThumbError={handleThumbError}
+            thumbErrors={thumbErrors}
+            thumbFallbacks={thumbFallbacks}
+          />
         </div>
       </div>
 
@@ -163,6 +302,45 @@ export default function FileInspectorPanel({
           </div>
         ) : null}
       </div>
+
+      {previewPath ? (
+        <div className="lightbox-overlay" role="dialog" onClick={closePreview}>
+          <div className="lightbox-content" onClick={(event) => event.stopPropagation()}>
+            <div className="lightbox-header">
+              <span className="lightbox-title">预览</span>
+              <button type="button" className="ghost" onClick={closePreview}>
+                关闭
+              </button>
+            </div>
+            <div className="lightbox-body">
+              {previewError || !previewSrc ? (
+                <div className="thumb-placeholder">无法预览</div>
+              ) : (
+                <img
+                  src={previewSrc}
+                  alt={previewPath}
+                  onError={async () => {
+                    if (!previewPath) {
+                      setPreviewError(true);
+                      return;
+                    }
+
+                    try {
+                      const bytes = await readBinaryFile(previewPath);
+                      const url = createImageBlobUrl(bytes);
+                      setPreviewSrc(url);
+                      setPreviewError(false);
+                    } catch {
+                      setPreviewError(true);
+                    }
+                  }}
+                />
+              )}
+            </div>
+            <p className="lightbox-caption">{previewPath}</p>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

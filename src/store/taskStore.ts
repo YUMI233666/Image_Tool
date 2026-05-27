@@ -43,6 +43,7 @@ export interface TaskStore {
   moveWorkflowStep: (stepId: string, direction: MoveDirection) => void;
   setActiveWorkflowStepId: (stepId: string | null) => void;
   updateWorkflowStepProcessor: (stepId: string, processorId: ProcessorId) => void;
+  setWorkflowStepEnabled: (stepId: string, enabled: boolean) => void;
   patchWorkflowStepParams: (stepId: string, patch: Record<string, unknown>) => void;
   patchRenameConfig: (patch: Partial<RenameConfig>) => void;
   setInputPaths: (items: string[]) => void;
@@ -70,6 +71,14 @@ const defaultParams: Record<ProcessorId, Record<string, unknown>> = {
   },
   rename: {},
   "upscale-anime": { scale: 2, denoiseLevel: 3 },
+  "manual-crop": {
+    applyMode: "percent",
+    defaultRect: undefined,
+    defaultPercentRect: undefined,
+    fileOverrides: {},
+    aspectRatio: "",
+    viewMode: "fit",
+  },
 };
 
 const defaultRenameConfig: RenameConfig = {
@@ -84,6 +93,7 @@ const defaultRenameConfig: RenameConfig = {
 const initialWorkflowStep: WorkflowStepRequest = {
   stepId: createStepId(),
   processorId: "trim-transparent",
+  enabled: true,
   params: cloneDefaultParams("trim-transparent"),
 };
 
@@ -112,6 +122,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
         const step: WorkflowStepRequest = {
           stepId: createStepId(),
           processorId: state.selectedProcessorId,
+          enabled: true,
           params: cloneDefaultParams(state.selectedProcessorId),
         };
 
@@ -132,6 +143,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
       const step: WorkflowStepRequest = {
         stepId: createStepId(),
         processorId,
+        enabled: true,
         params: cloneDefaultParams(processorId),
       };
 
@@ -193,7 +205,20 @@ export const useTaskStore = create<TaskStore>((set) => ({
           ? {
               ...step,
               processorId,
+              enabled: true,
               params: cloneDefaultParams(processorId),
+            }
+          : step,
+      ),
+    })),
+
+  setWorkflowStepEnabled: (stepId, enabled) =>
+    set((state) => ({
+      workflowSteps: state.workflowSteps.map((step) =>
+        step.stepId === stepId
+          ? {
+              ...step,
+              enabled,
             }
           : step,
       ),

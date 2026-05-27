@@ -3,6 +3,11 @@ import { invoke } from "@tauri-apps/api/tauri";
 import type {
   BatchJobReport,
   BatchProgressPayload,
+  CropCompletePayload,
+  CropErrorPayload,
+  CropImageRequest,
+  CropImageResponse,
+  CropStartPayload,
   PathImageInfo,
   ProcessorDescriptor,
   ProcessorId,
@@ -55,6 +60,12 @@ export async function upscaleAnime(
   request: UpscaleAnimeRequest,
 ): Promise<UpscaleAnimeResponse> {
   return invoke<UpscaleAnimeResponse>("upscale_anime", { request });
+}
+
+export async function cropImage(
+  request: CropImageRequest,
+): Promise<CropImageResponse> {
+  return invoke<CropImageResponse>("crop_image", { request });
 }
 
 export async function listenBatchProgress(
@@ -130,6 +141,42 @@ export async function listenUpscaleError(
   callback: (payload: UpscaleErrorPayload) => void,
 ): Promise<() => void> {
   const unlisten = await listen<UpscaleErrorPayload>("upscale-error", (event) => {
+    if (event.payload) {
+      callback(event.payload);
+    }
+  });
+
+  return unlisten;
+}
+
+export async function listenCropStart(
+  callback: (payload: CropStartPayload) => void,
+): Promise<() => void> {
+  const unlisten = await listen<CropStartPayload>("crop-start", (event) => {
+    if (event.payload) {
+      callback(event.payload);
+    }
+  });
+
+  return unlisten;
+}
+
+export async function listenCropComplete(
+  callback: (payload: CropCompletePayload) => void,
+): Promise<() => void> {
+  const unlisten = await listen<CropCompletePayload>("crop-complete", (event) => {
+    if (event.payload) {
+      callback(event.payload);
+    }
+  });
+
+  return unlisten;
+}
+
+export async function listenCropError(
+  callback: (payload: CropErrorPayload) => void,
+): Promise<() => void> {
+  const unlisten = await listen<CropErrorPayload>("crop-error", (event) => {
     if (event.payload) {
       callback(event.payload);
     }

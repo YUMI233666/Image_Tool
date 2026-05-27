@@ -11,7 +11,8 @@ fn supported_extensions(processor_id: &str) -> &'static [&'static str] {
     | "repair"
     | "resolution-transform"
     | "rename"
-    | "upscale-anime" => {
+    | "upscale-anime"
+    | "manual-crop" => {
       &["png", "jpg", "jpeg", "webp", "bmp", "tiff"]
     }
     _ => &["png"],

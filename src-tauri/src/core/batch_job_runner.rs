@@ -24,8 +24,14 @@ pub struct WorkflowStepRequest {
   #[serde(default)]
   pub step_id: String,
   pub processor_id: String,
+  #[serde(default = "default_step_enabled")]
+  pub enabled: bool,
   #[serde(default)]
   pub params: Value,
+}
+
+fn default_step_enabled() -> bool {
+  true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +97,7 @@ fn preferred_extension_for_step(processor_id: &str, params: &Value) -> Option<St
 fn preferred_extension_for_steps(steps: &[WorkflowStepRequest]) -> Option<String> {
   steps
     .iter()
+    .filter(|step| step.enabled)
     .rev()
     .find_map(|step| preferred_extension_for_step(step.processor_id.as_str(), &step.params))
 }
@@ -103,6 +110,7 @@ fn resolve_effective_steps(request: &BatchJobRequest) -> Vec<WorkflowStepRequest
   vec![WorkflowStepRequest {
     step_id: "legacy-step-1".to_string(),
     processor_id: request.processor_id.clone(),
+    enabled: true,
     params: request.params.clone(),
   }]
 }
@@ -198,7 +206,19 @@ pub fn run_batch_job(
     ));
   }
 
-  for step in &steps {
+  let enabled_steps = steps
+    .iter()
+    .filter(|step| step.enabled)
+    .cloned()
+    .collect::<Vec<_>>();
+
+  if enabled_steps.is_empty() {
+    return Err(ProcessError::Validation(
+      "没有启用的工作流步骤。".to_string(),
+    ));
+  }
+
+  for step in &enabled_steps {
     if step.processor_id.trim().is_empty() {
       return Err(ProcessError::Validation(
         "工作流存在空处理器标识。".to_string(),
@@ -212,7 +232,7 @@ pub fn run_batch_job(
     processor.validate(&step.params)?;
   }
 
-  let discovery_processor_id = steps
+  let discovery_processor_id = enabled_steps
     .first()
     .map(|step| step.processor_id.as_str())
     .unwrap_or(request.processor_id.as_str());
@@ -222,7 +242,7 @@ pub fn run_batch_job(
     discovery_processor_id,
     request.include_subdirectories,
   )?;
-  let preferred_extension = preferred_extension_for_steps(&steps);
+  let preferred_extension = preferred_extension_for_steps(&enabled_steps);
   let planned_paths = plan_output_paths(
     &input_files,
     &request.output_dir,
@@ -276,7 +296,7 @@ pub fn run_batch_job(
   let cancelled = AtomicU64::new(0);
   let processed = AtomicU64::new(0);
   let item_reports: Arc<Mutex<Vec<BatchItemReport>>> = Arc::new(Mutex::new(Vec::new()));
-  let shared_steps = Arc::new(steps);
+  let shared_steps = Arc::new(enabled_steps);
   let shared_job_id = request.job_id.clone();
   let shared_output_dir = request.output_dir.clone();
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import BatchInputPanel from "./components/BatchInputPanel";
+import CropEditorModal from "./components/CropEditorModal";
 import FileInspectorPanel from "./components/FileInspectorPanel";
 import FunctionSelector from "./components/FunctionSelector";
 import RenameRulePanel from "./components/RenameRulePanel";
@@ -18,6 +19,7 @@ import {
 } from "./lib/api/tauri";
 import type {
   BatchItemReport,
+  ManualCropParams,
   PathImageInfo,
   ProcessorDescriptor,
   ProcessorId,
@@ -68,6 +70,12 @@ const fallbackProcessors: ProcessorDescriptor[] = [
     enabled: true,
     notes: "适合赛璐珞/伪厚涂风格的 AI 超分，可调降噪等级。",
   },
+  {
+    id: "manual-crop",
+    displayName: "手动裁剪",
+    enabled: true,
+    notes: "自定义裁剪框，支持比例锁定与逐张配置。",
+  },
 ];
 
 const INSPECT_LOADING_DELAY_MS = 180;
@@ -114,6 +122,7 @@ export default function App() {
     moveWorkflowStep,
     setActiveWorkflowStepId,
     updateWorkflowStepProcessor,
+    setWorkflowStepEnabled,
     patchWorkflowStepParams,
     patchRenameConfig,
     setInputPaths,
@@ -137,6 +146,11 @@ export default function App() {
   const [overrideCandidatePaths, setOverrideCandidatePaths] = useState<string[]>([]);
   const [isLoadingOverrideCandidates, setIsLoadingOverrideCandidates] = useState(false);
   const [overrideCandidatesError, setOverrideCandidatesError] = useState("");
+  const [cropCandidatePaths, setCropCandidatePaths] = useState<string[]>([]);
+  const [isLoadingCropCandidates, setIsLoadingCropCandidates] = useState(false);
+  const [cropCandidatesError, setCropCandidatesError] = useState("");
+  const [isCropEditorOpen, setIsCropEditorOpen] = useState(false);
+  const [cropActiveIndex, setCropActiveIndex] = useState(0);
   const inspectRequestIdRef = useRef(0);
   const inspectLoadingTimerRef = useRef<number | null>(null);
   const inspectCacheRef = useRef<Map<string, PathImageInfo>>(new Map());
@@ -338,6 +352,56 @@ export default function App() {
     };
   }, [includeSubdirectories, inputPaths, parameterEditorProcessorId]);
 
+  useEffect(() => {
+    if (parameterEditorProcessorId !== "manual-crop") {
+      setCropCandidatePaths([]);
+      setIsLoadingCropCandidates(false);
+      setCropCandidatesError("");
+      return;
+    }
+
+    if (inputPaths.length === 0) {
+      setCropCandidatePaths([]);
+      setIsLoadingCropCandidates(false);
+      setCropCandidatesError("");
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingCropCandidates(true);
+    setCropCandidatesError("");
+
+    previewDiscoveredFiles("manual-crop", inputPaths, includeSubdirectories)
+      .then((paths) => {
+        if (cancelled) {
+          return;
+        }
+
+        setCropCandidatePaths(paths);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        const reason =
+          error instanceof Error
+            ? error.message
+            : "加载裁剪图片列表失败，已回退为输入路径列表。";
+        setCropCandidatesError(reason);
+        setCropCandidatePaths(inputPaths);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingCropCandidates(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [includeSubdirectories, inputPaths, parameterEditorProcessorId]);
+
   const inspectPathInfo = async (path: string) => {
     const requestId = inspectRequestIdRef.current + 1;
     inspectRequestIdRef.current = requestId;
@@ -411,6 +475,35 @@ export default function App() {
     inspectPathInfo(path).catch(() => undefined);
   };
 
+  const cropPaths = cropCandidatePaths.length > 0 ? cropCandidatePaths : inputPaths;
+  const activeCropPath = cropPaths[cropActiveIndex] ?? null;
+
+  const openCropEditor = (path?: string) => {
+    const target = path ?? cropPaths[0];
+    if (!target) {
+      return;
+    }
+
+    const index = cropPaths.findIndex((item) => item === target);
+    setCropActiveIndex(index >= 0 ? index : 0);
+    handleSelectInputPath(target);
+    setIsCropEditorOpen(true);
+  };
+
+  const handleSelectCropPath = (path: string) => {
+    const index = cropPaths.findIndex((item) => item === path);
+    if (index >= 0) {
+      setCropActiveIndex(index);
+    }
+    handleSelectInputPath(path);
+  };
+
+  useEffect(() => {
+    if (cropActiveIndex >= cropPaths.length) {
+      setCropActiveIndex(0);
+    }
+  }, [cropActiveIndex, cropPaths.length]);
+
   useEffect(() => {
     if (!selectedInputPath) {
       return;
@@ -462,6 +555,9 @@ export default function App() {
       }
 
       const unavailableStep = workflowSteps.find((step) => {
+        if (step.enabled === false) {
+          return false;
+        }
         const processor = availableProcessors.find(
           (item) => item.id === step.processorId,
         );
@@ -505,6 +601,7 @@ export default function App() {
         ? workflowSteps.map((step) => ({
             stepId: step.stepId,
             processorId: step.processorId,
+            enabled: step.enabled ?? true,
             params: step.params,
           }))
         : undefined;
@@ -1030,6 +1127,91 @@ export default function App() {
           </>
         );
       }
+      case "manual-crop":
+      {
+        const params = selectedParams as unknown as ManualCropParams;
+        const applyMode = params.applyMode === "absolute" ? "absolute" : "percent";
+        const viewMode = params.viewMode === "actual" ? "actual" : "fit";
+        const aspectRatio = params.aspectRatio ?? "";
+        const fileOverrides = params.fileOverrides ?? {};
+        const overrideEntries = Object.values(fileOverrides);
+        const configuredCount = overrideEntries.filter(
+          (item) => item.skip || item.rect || item.percentRect,
+        ).length;
+        const skippedCount = overrideEntries.filter((item) => item.skip).length;
+
+        return (
+          <>
+            <label className="field">
+              <span>锁定比例（可空）</span>
+              <input
+                type="text"
+                placeholder="16:9 / 4:3 / 1.78"
+                value={aspectRatio}
+                disabled={isRunning}
+                onChange={(event) =>
+                  patchCurrentParams("manual-crop", { aspectRatio: event.target.value })
+                }
+              />
+            </label>
+            <label className="field">
+              <span>应用到全部模式</span>
+              <select
+                value={applyMode}
+                onChange={(event) =>
+                  patchCurrentParams("manual-crop", { applyMode: event.target.value })
+                }
+                disabled={isRunning}
+              >
+                <option value="percent">按比例（适配不同尺寸）</option>
+                <option value="absolute">按绝对像素（尺寸需满足）</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>视图模式</span>
+              <select
+                value={viewMode}
+                onChange={(event) =>
+                  patchCurrentParams("manual-crop", { viewMode: event.target.value })
+                }
+                disabled={isRunning}
+              >
+                <option value="fit">适应窗口</option>
+                <option value="actual">原始大小</option>
+              </select>
+            </label>
+            <div className="toolbar">
+              <button
+                type="button"
+                onClick={() => openCropEditor(selectedInputPath ?? cropPaths[0])}
+                disabled={
+                  isRunning ||
+                  isLoadingCropCandidates ||
+                  cropPaths.length === 0
+                }
+              >
+                打开裁剪编辑器
+              </button>
+            </div>
+            {isLoadingCropCandidates ? (
+              <p className="muted">正在加载裁剪图片列表...</p>
+            ) : null}
+            {cropCandidatesError ? (
+              <p className="error-inline">{cropCandidatesError}</p>
+            ) : null}
+            {cropPaths.length === 0 ? (
+              <p className="muted">先选择输入文件后再配置裁剪区域。</p>
+            ) : (
+              <p className="hint">
+                已配置 {configuredCount} 张，跳过 {skippedCount} 张。
+              </p>
+            )}
+            <p className="hint">
+              裁剪坐标使用原始像素尺寸；绝对像素模式会校验尺寸是否满足。
+            </p>
+          </>
+        );
+      }
       case "rename":
         return (
           <p className="muted">
@@ -1095,6 +1277,7 @@ export default function App() {
             onRemoveStep={removeWorkflowStep}
             onMoveStep={moveWorkflowStep}
             onChangeStepProcessor={updateWorkflowStepProcessor}
+            onToggleStepEnabled={setWorkflowStepEnabled}
           />
         )}
 
@@ -1151,6 +1334,17 @@ export default function App() {
           onOpenReport={openReport}
         />
       </section>
+
+        <CropEditorModal
+          isOpen={isCropEditorOpen}
+          isRunning={isRunning}
+          paths={cropPaths}
+          activePath={activeCropPath}
+          params={selectedParams as unknown as ManualCropParams}
+          onPatchParams={(patch) => patchCurrentParams("manual-crop", patch)}
+          onSelectPath={handleSelectCropPath}
+          onClose={() => setIsCropEditorOpen(false)}
+        />
     </main>
   );
 }

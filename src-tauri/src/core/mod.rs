@@ -1,4 +1,5 @@
 pub mod batch_job_runner;
+pub mod crop_runner;
 pub mod file_discovery;
 pub mod output_resolver;
 pub mod processor;

@@ -347,11 +347,13 @@ fn workflow_steps_with_rename_template_run_successfully() {
       WorkflowStepRequest {
         step_id: "step-1".to_string(),
         processor_id: "trim-transparent".to_string(),
+        enabled: true,
         params: json!({ "alphaThreshold": 0, "padding": 0 }),
       },
       WorkflowStepRequest {
         step_id: "step-2".to_string(),
         processor_id: "format-convert".to_string(),
+        enabled: true,
         params: json!({ "targetFormat": "jpg" }),
       },
     ],

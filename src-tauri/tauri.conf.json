@@ -8,7 +8,7 @@
   },
   "package": {
     "productName": "Art Tool",
-    "version": "1.2.0"
+    "version": "1.3.0"
   },
   "tauri": {
     "allowlist": {
@@ -22,12 +22,21 @@
           "**"
         ]
       },
+      "protocol": {
+        "asset": true,
+        "assetScope": [
+          "**"
+        ]
+      },
       "path": {
         "all": true
       },
       "shell": {
         "open": true
       }
+    },
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost https://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'"
     },
     "bundle": {
       "active": true,
