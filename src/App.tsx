@@ -3,1348 +3,340 @@ import BatchInputPanel from "./components/BatchInputPanel";
 import CropEditorModal from "./components/CropEditorModal";
 import FileInspectorPanel from "./components/FileInspectorPanel";
 import FunctionSelector from "./components/FunctionSelector";
+import ParameterEditor from "./components/ParameterEditor";
 import RenameRulePanel from "./components/RenameRulePanel";
 import ResultSummaryPanel from "./components/ResultSummaryPanel";
+import Sidebar, { type NavTab } from "./components/Sidebar";
 import TaskQueuePanel from "./components/TaskQueuePanel";
+import ToastContainer from "./components/Toast";
 import WorkflowBuilder from "./components/WorkflowBuilder";
 import {
-  cancelBatchJob,
-  getPathImageInfo,
-  listProcessors,
-  listenBatchComplete,
-  listenBatchProgress,
-  openPathInSystem,
-  previewDiscoveredFiles,
-  startBatchJob,
+  cancelBatchJob, getPathImageInfo, listProcessors, listenBatchComplete,
+  listenBatchProgress, openPathInSystem, previewDiscoveredFiles, startBatchJob,
 } from "./lib/api/tauri";
+import { toastOk, toastErr } from "./lib/toast";
 import type {
-  BatchItemReport,
-  ManualCropParams,
-  PathImageInfo,
-  ProcessorDescriptor,
-  ProcessorId,
-  WorkflowStepRequest,
+  BatchItemReport, BatchJobReport, ManualCropParams, PathImageInfo,
+  ProcessorDescriptor, ProcessorId, WorkflowStepRequest,
 } from "./lib/types";
 import { useTaskStore } from "./store/taskStore";
 
 const fallbackProcessors: ProcessorDescriptor[] = [
-  {
-    id: "trim-transparent",
-    displayName: "裁剪透明边缘",
-    enabled: true,
-    notes: "裁剪 PNG 的透明边缘到非透明像素区域。",
-  },
-  {
-    id: "format-convert",
-    displayName: "图像格式转换",
-    enabled: true,
-    notes: "支持 PNG/JPG/WEBP 格式互转。",
-  },
-  {
-    id: "compress",
-    displayName: "图像压缩",
-    enabled: true,
-    notes: "支持 JPG/PNG/WEBP 压缩（BMP/TIFF 建议先转换后再压缩）。",
-  },
-  {
-    id: "repair",
-    displayName: "图像修复",
-    enabled: true,
-    notes: "支持自动修复、边缘保留去噪、轻度划痕修复与低分辨率增强（独立锐化强度）。",
-  },
-  {
-    id: "resolution-transform",
-    displayName: "变换分辨率",
-    enabled: true,
-    notes: "支持目标分辨率缩放：目标更小时压缩、目标更大时超分；PNG 可透明居中占位，支持单文件目标覆盖。",
-  },
-  {
-    id: "rename",
-    displayName: "批量重命名",
-    enabled: true,
-    notes: "仅修改输出文件名，不改变图片内容。",
-  },
-  {
-    id: "upscale-anime",
-    displayName: "二次元超分",
-    enabled: true,
-    notes: "适合赛璐珞/伪厚涂风格的 AI 超分，可调降噪等级。",
-  },
-  {
-    id: "manual-crop",
-    displayName: "手动裁剪",
-    enabled: true,
-    notes: "自定义裁剪框，支持比例锁定与逐张配置。",
-  },
+  { id:"trim-transparent",  displayName:"裁剪透明边缘",   enabled:true, notes:"裁剪PNG透明边缘。" },
+  { id:"format-convert",   displayName:"图像格式转换",   enabled:true, notes:"PNG/JPG/WEBP互转。" },
+  { id:"compress",         displayName:"图像压缩",       enabled:true, notes:"JPG/PNG/WEBP压缩。" },
+  { id:"repair",           displayName:"图像修复",       enabled:true, notes:"去噪/划痕/超分。" },
+  { id:"resolution-transform", displayName:"变换分辨率", enabled:true, notes:"自动缩放或超分。" },
+  { id:"rename",           displayName:"批量重命名",     enabled:true, notes:"自定义或模板命名。" },
+  { id:"upscale-anime",    displayName:"二次元超分",     enabled:true, notes:"2x/4x AI超分。" },
+  { id:"manual-crop",      displayName:"手动裁剪",       enabled:true, notes:"比例锁定逐张配置。" },
 ];
-
-const INSPECT_LOADING_DELAY_MS = 180;
-const RESOLUTION_MIN_EDGE = 1;
-const RESOLUTION_MAX_EDGE = 16384;
-const PARAM_MIN_STRENGTH = 1;
-const PARAM_MAX_STRENGTH = 100;
-
-type ResolutionFileOverrideMap = Record<
-  string,
-  { targetWidth?: unknown; targetHeight?: unknown }
->;
-
-function clampInt(value: unknown, min: number, max: number): number {
-  if (typeof value !== "number" || Number.isNaN(value)) {
-    return min;
-  }
-
-  return Math.min(max, Math.max(min, Math.floor(value)));
-}
+const INSPECT_DELAY=180;
 
 export default function App() {
   const {
-    availableProcessors,
-    runMode,
-    selectedProcessorId,
-    workflowSteps,
-    activeWorkflowStepId,
-    renameConfig,
-    inputPaths,
-    outputDir,
-    includeSubdirectories,
-    maxConcurrency,
-    paramsByProcessor,
-    activeJobId,
-    isRunning,
-    progress,
-    report,
-    setAvailableProcessors,
-    setRunMode,
-    setSelectedProcessorId,
-    addWorkflowStep,
-    removeWorkflowStep,
-    moveWorkflowStep,
-    setActiveWorkflowStepId,
-    updateWorkflowStepProcessor,
-    setWorkflowStepEnabled,
-    patchWorkflowStepParams,
-    patchRenameConfig,
-    setInputPaths,
-    setOutputDir,
-    setIncludeSubdirectories,
-    setMaxConcurrency,
-    patchParams,
-    beginRun,
-    setActiveJobId,
-    setProgress,
-    finishRun,
-    resetReport,
+    availableProcessors, runMode, selectedProcessorId, workflowSteps, activeWorkflowStepId,
+    renameConfig, inputPaths, outputDir, includeSubdirectories, maxConcurrency,
+    paramsByProcessor, activeJobId, isRunning, progress, report,
+    setAvailableProcessors, setRunMode, setSelectedProcessorId,
+    addWorkflowStep, removeWorkflowStep, moveWorkflowStep, setActiveWorkflowStepId,
+    updateWorkflowStepProcessor, setWorkflowStepEnabled, patchWorkflowStepParams,
+    patchRenameConfig, setInputPaths, setOutputDir, setIncludeSubdirectories,
+    setMaxConcurrency, patchParams, beginRun, setActiveJobId, setProgress,
+    finishRun, resetReport,
   } = useTaskStore();
 
-  const [uiError, setUiError] = useState<string>("");
-  const [selectedInputPath, setSelectedInputPath] = useState<string | null>(null);
-  const [selectedOutputPath, setSelectedOutputPath] = useState<string | null>(null);
-  const [inspectedInfo, setInspectedInfo] = useState<PathImageInfo | null>(null);
+  const [theme, setTheme] = useState<"dark"|"light">(
+    ()=>(localStorage.getItem("art-tool-theme") as "dark"|"light")??("dark")
+  );
+  const [activeTab, setActiveTab] = useState<NavTab>("input");
+  const [uiError, setUiError] = useState("");
+  const [selectedInputPath, setSelectedInputPath] = useState<string|null>(null);
+  const [selectedOutputPath, setSelectedOutputPath] = useState<string|null>(null);
+  const [inspectedInfo, setInspectedInfo] = useState<PathImageInfo|null>(null);
   const [isInspecting, setIsInspecting] = useState(false);
   const [inspectError, setInspectError] = useState("");
-  const [overrideCandidatePaths, setOverrideCandidatePaths] = useState<string[]>([]);
-  const [isLoadingOverrideCandidates, setIsLoadingOverrideCandidates] = useState(false);
-  const [overrideCandidatesError, setOverrideCandidatesError] = useState("");
-  const [cropCandidatePaths, setCropCandidatePaths] = useState<string[]>([]);
-  const [isLoadingCropCandidates, setIsLoadingCropCandidates] = useState(false);
-  const [cropCandidatesError, setCropCandidatesError] = useState("");
-  const [isCropEditorOpen, setIsCropEditorOpen] = useState(false);
-  const [cropActiveIndex, setCropActiveIndex] = useState(0);
-  const inspectRequestIdRef = useRef(0);
-  const inspectLoadingTimerRef = useRef<number | null>(null);
-  const inspectCacheRef = useRef<Map<string, PathImageInfo>>(new Map());
-  const progressUnlistenRef = useRef<(() => void) | null>(null);
-  const completeUnlistenRef = useRef<(() => void) | null>(null);
-  const bindingPromiseRef = useRef<Promise<void> | null>(null);
+  const [overrideCandidates, setOverrideCandidates] = useState<string[]>([]);
+  const [isLoadingOC, setIsLoadingOC] = useState(false);
+  const [ocError, setOcError] = useState("");
+  const [cropCandidates, setCropCandidates] = useState<string[]>([]);
+  const [isLoadingCC, setIsLoadingCC] = useState(false);
+  const [ccError, setCcError] = useState("");
+  const [isCropOpen, setIsCropOpen] = useState(false);
+  const [cropIdx, setCropIdx] = useState(0);
+  const inspectIdRef=useRef(0);
+  const inspectTimerRef=useRef<number|null>(null);
+  const inspectCache=useRef(new Map<string,PathImageInfo>());
+  const progressUL=useRef<(()=>void)|null>(null);
+  const completeUL=useRef<(()=>void)|null>(null);
+  const bindPromise=useRef<Promise<void>|null>(null);
+  const startRef=useRef<(()=>Promise<void>)|null>(null);
 
-  useEffect(() => {
-    let mounted = true;
+  // Theme persistence
+  useEffect(()=>{
+    document.documentElement.setAttribute('data-theme',theme);
+    localStorage.setItem('art-tool-theme',theme);
+  },[theme]);
 
-    listProcessors()
-      .then((items) => {
-        if (!mounted) {
-          return;
-        }
-
-        if (items.length === 0) {
-          setAvailableProcessors(fallbackProcessors);
-          return;
-        }
-
-        setAvailableProcessors(items);
-      })
-      .catch(() => {
-        if (mounted) {
-          setAvailableProcessors(fallbackProcessors);
-        }
-      });
-
-    return () => {
-      mounted = false;
+  // Keyboard shortcuts
+  useEffect(()=>{
+    const down=(e:KeyboardEvent)=>{
+      if((e.ctrlKey||e.metaKey)&&e.key==='r'){e.preventDefault();startRef.current?.();}
+      if(e.key==='Escape'&&isRunning){cancelBatchJob(activeJobId!).catch(()=>{});}
     };
-  }, [setAvailableProcessors]);
+    window.addEventListener('keydown',down);
+    return()=>window.removeEventListener('keydown',down);
+  },[isRunning,activeJobId]);
 
-  useEffect(() => {
-    return () => {
-      if (inspectLoadingTimerRef.current !== null) {
-        window.clearTimeout(inspectLoadingTimerRef.current);
-        inspectLoadingTimerRef.current = null;
-      }
-    };
-  }, []);
+  // Load processors
+  useEffect(()=>{
+    let m=true;
+    listProcessors().then(items=>{if(m)setAvailableProcessors(items.length?items:fallbackProcessors);})
+      .catch(()=>{if(m)setAvailableProcessors(fallbackProcessors);});
+    return()=>{m=false;};
+  },[setAvailableProcessors]);
 
-  const ensureBatchListenersBound = useCallback(async () => {
-    if (progressUnlistenRef.current && completeUnlistenRef.current) {
-      return;
-    }
+  const handleFinishRun=useCallback((r:BatchJobReport)=>{
+    finishRun(r);
+    if(r.failed===0) toastOk('处理完成！成功 '+r.succeeded+' 张');
+    else toastErr('完成，但有 '+r.failed+' 张失败');
+    setActiveTab('results');
+  },[finishRun]);
 
-    if (bindingPromiseRef.current) {
-      await bindingPromiseRef.current;
-      return;
-    }
-
-    bindingPromiseRef.current = (async () => {
-      const unlistenProgress = await listenBatchProgress((payload) => {
-        setActiveJobId(payload.jobId);
-        setProgress(payload);
-      });
-
-      const unlistenComplete = await listenBatchComplete((payload) => {
-        finishRun(payload);
-      });
-
-      progressUnlistenRef.current = unlistenProgress;
-      completeUnlistenRef.current = unlistenComplete;
+  const ensureListeners=useCallback(async()=>{
+    if(progressUL.current&&completeUL.current)return;
+    if(bindPromise.current){await bindPromise.current;return;}
+    bindPromise.current=(async()=>{
+      const ul1=await listenBatchProgress(p=>{setActiveJobId(p.jobId);setProgress(p);});
+      const ul2=await listenBatchComplete(r=>{handleFinishRun(r);});
+      progressUL.current=ul1;completeUL.current=ul2;
     })();
+    try{await bindPromise.current;}finally{bindPromise.current=null;}
+  },[handleFinishRun,setActiveJobId,setProgress]);
 
-    try {
-      await bindingPromiseRef.current;
-    } finally {
-      bindingPromiseRef.current = null;
-    }
-  }, [finishRun, setActiveJobId, setProgress]);
+  useEffect(()=>{
+    ensureListeners().catch(()=>{});
+    return()=>{progressUL.current?.();completeUL.current?.();progressUL.current=null;completeUL.current=null;};
+  },[ensureListeners]);
 
-  useEffect(() => {
-    ensureBatchListenersBound().catch(() => undefined);
+  // Inspect cleanup
+  useEffect(()=>()=>{if(inspectTimerRef.current!==null)window.clearTimeout(inspectTimerRef.current);},[]);
 
-    return () => {
-      if (progressUnlistenRef.current) {
-        progressUnlistenRef.current();
-        progressUnlistenRef.current = null;
-      }
+  // Active processor id for params/overrides
+  const activeWF=useMemo<WorkflowStepRequest|null>(()=>{
+    if(!workflowSteps.length)return null;
+    return workflowSteps.find(s=>s.stepId===activeWorkflowStepId)??workflowSteps[0];
+  },[activeWorkflowStepId,workflowSteps]);
+  const activeWFIdx=useMemo(()=>workflowSteps.findIndex(s=>s.stepId===activeWorkflowStepId),[activeWorkflowStepId,workflowSteps]);
+  const paramProcId=runMode==='quick'?selectedProcessorId:(activeWF?.processorId??null);
+  const selectedParams=runMode==='quick'?paramsByProcessor[selectedProcessorId]:(activeWF?.params??{});
+  const allProcs=availableProcessors.length?availableProcessors:fallbackProcessors;
 
-      if (completeUnlistenRef.current) {
-        completeUnlistenRef.current();
-        completeUnlistenRef.current = null;
-      }
-    };
-  }, [ensureBatchListenersBound]);
+  // Override candidates
+  useEffect(()=>{
+    if(paramProcId!=='resolution-transform'||inputPaths.length===0){setOverrideCandidates([]);setIsLoadingOC(false);setOcError('');return;}
+    let cancel=false;setIsLoadingOC(true);setOcError('');
+    previewDiscoveredFiles('resolution-transform',inputPaths,includeSubdirectories)
+      .then(p=>{if(!cancel)setOverrideCandidates(p);})
+      .catch(e=>{if(!cancel){setOcError(e instanceof Error?e.message:'加载失败');setOverrideCandidates(inputPaths);}})
+      .finally(()=>{if(!cancel)setIsLoadingOC(false);});
+    return()=>{cancel=true;};
+  },[includeSubdirectories,inputPaths,paramProcId]);
 
-  const selectedProcessor = useMemo(() => {
-    return availableProcessors.find((item) => item.id === selectedProcessorId);
-  }, [availableProcessors, selectedProcessorId]);
+  // Crop candidates
+  useEffect(()=>{
+    if(paramProcId!=='manual-crop'||inputPaths.length===0){setCropCandidates([]);setIsLoadingCC(false);setCcError('');return;}
+    let cancel=false;setIsLoadingCC(true);setCcError('');
+    previewDiscoveredFiles('manual-crop',inputPaths,includeSubdirectories)
+      .then(p=>{if(!cancel)setCropCandidates(p);})
+      .catch(e=>{if(!cancel){setCcError(e instanceof Error?e.message:'加载失败');setCropCandidates(inputPaths);}})
+      .finally(()=>{if(!cancel)setIsLoadingCC(false);});
+    return()=>{cancel=true;};
+  },[includeSubdirectories,inputPaths,paramProcId]);
 
-  const activeWorkflowStep = useMemo<WorkflowStepRequest | null>(() => {
-    if (workflowSteps.length === 0) {
-      return null;
-    }
+  const cropPaths=cropCandidates.length>0?cropCandidates:inputPaths;
+  const activeCropPath=cropPaths[cropIdx]??null;
 
-    return (
-      workflowSteps.find((step) => step.stepId === activeWorkflowStepId) ??
-      workflowSteps[0]
-    );
-  }, [activeWorkflowStepId, workflowSteps]);
-
-  const activeWorkflowStepIndex = useMemo(() => {
-    if (!activeWorkflowStepId) {
-      return -1;
-    }
-
-    return workflowSteps.findIndex((step) => step.stepId === activeWorkflowStepId);
-  }, [activeWorkflowStepId, workflowSteps]);
-
-  const parameterEditorProcessorId =
-    runMode === "quick"
-      ? selectedProcessorId
-      : (activeWorkflowStep?.processorId ?? null);
-
-  const outputItems = useMemo<BatchItemReport[]>(() => {
-    if (!report) {
-      return [];
-    }
-
-    return report.items.filter((item) => Boolean(item.outputPath));
-  }, [report]);
-
-  const selectedParams =
-    runMode === "quick"
-      ? paramsByProcessor[selectedProcessorId]
-      : (activeWorkflowStep?.params ?? {});
-
-  const patchCurrentParams = useCallback(
-    (processorId: ProcessorId, patch: Record<string, unknown>) => {
-      if (runMode === "quick") {
-        patchParams(processorId, patch);
-        return;
-      }
-
-      if (!activeWorkflowStep || activeWorkflowStep.processorId !== processorId) {
-        return;
-      }
-
-      patchWorkflowStepParams(activeWorkflowStep.stepId, patch);
-    },
-    [activeWorkflowStep, patchParams, patchWorkflowStepParams, runMode],
-  );
-
-  useEffect(() => {
-    if (parameterEditorProcessorId !== "resolution-transform") {
-      setOverrideCandidatePaths([]);
-      setIsLoadingOverrideCandidates(false);
-      setOverrideCandidatesError("");
-      return;
-    }
-
-    if (inputPaths.length === 0) {
-      setOverrideCandidatePaths([]);
-      setIsLoadingOverrideCandidates(false);
-      setOverrideCandidatesError("");
-      return;
-    }
-
-    let cancelled = false;
-    setIsLoadingOverrideCandidates(true);
-    setOverrideCandidatesError("");
-
-    previewDiscoveredFiles(
-      "resolution-transform",
-      inputPaths,
-      includeSubdirectories,
-    )
-      .then((paths) => {
-        if (cancelled) {
-          return;
-        }
-
-        setOverrideCandidatePaths(paths);
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-
-        const reason =
-          error instanceof Error
-            ? error.message
-            : "加载批处理文件列表失败，已回退为输入路径列表。";
-        setOverrideCandidatesError(reason);
-        setOverrideCandidatePaths(inputPaths);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoadingOverrideCandidates(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [includeSubdirectories, inputPaths, parameterEditorProcessorId]);
-
-  useEffect(() => {
-    if (parameterEditorProcessorId !== "manual-crop") {
-      setCropCandidatePaths([]);
-      setIsLoadingCropCandidates(false);
-      setCropCandidatesError("");
-      return;
-    }
-
-    if (inputPaths.length === 0) {
-      setCropCandidatePaths([]);
-      setIsLoadingCropCandidates(false);
-      setCropCandidatesError("");
-      return;
-    }
-
-    let cancelled = false;
-    setIsLoadingCropCandidates(true);
-    setCropCandidatesError("");
-
-    previewDiscoveredFiles("manual-crop", inputPaths, includeSubdirectories)
-      .then((paths) => {
-        if (cancelled) {
-          return;
-        }
-
-        setCropCandidatePaths(paths);
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-
-        const reason =
-          error instanceof Error
-            ? error.message
-            : "加载裁剪图片列表失败，已回退为输入路径列表。";
-        setCropCandidatesError(reason);
-        setCropCandidatePaths(inputPaths);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoadingCropCandidates(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [includeSubdirectories, inputPaths, parameterEditorProcessorId]);
-
-  const inspectPathInfo = async (path: string) => {
-    const requestId = inspectRequestIdRef.current + 1;
-    inspectRequestIdRef.current = requestId;
-
-    setInspectError("");
-
-    const cached = inspectCacheRef.current.get(path);
-    if (cached) {
-      setIsInspecting(false);
-      setInspectedInfo(cached);
-      return;
-    }
-
-    if (inspectLoadingTimerRef.current !== null) {
-      window.clearTimeout(inspectLoadingTimerRef.current);
-      inspectLoadingTimerRef.current = null;
-    }
-
-    inspectLoadingTimerRef.current = window.setTimeout(() => {
-      if (inspectRequestIdRef.current === requestId) {
-        setIsInspecting(true);
-      }
-    }, INSPECT_LOADING_DELAY_MS);
-
-    try {
-      const info = await getPathImageInfo(path);
-      if (inspectRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      inspectCacheRef.current.set(path, info);
-      setInspectedInfo(info);
-    } catch (error) {
-      if (inspectRequestIdRef.current !== requestId) {
-        return;
-      }
-
-      const reason =
-        error instanceof Error ? error.message : "读取图片参数信息失败。";
-      setInspectedInfo(null);
-      setInspectError(reason);
-    } finally {
-      if (inspectRequestIdRef.current === requestId) {
-        if (inspectLoadingTimerRef.current !== null) {
-          window.clearTimeout(inspectLoadingTimerRef.current);
-          inspectLoadingTimerRef.current = null;
-        }
-
-        setIsInspecting(false);
-      }
+  const inspectPath=async(path:string)=>{
+    const rid=++inspectIdRef.current;setInspectError('');
+    const cached=inspectCache.current.get(path);
+    if(cached){setIsInspecting(false);setInspectedInfo(cached);return;}
+    if(inspectTimerRef.current!==null){window.clearTimeout(inspectTimerRef.current);inspectTimerRef.current=null;}
+    inspectTimerRef.current=window.setTimeout(()=>{if(inspectIdRef.current===rid)setIsInspecting(true);},INSPECT_DELAY);
+    try{
+      const info=await getPathImageInfo(path);
+      if(inspectIdRef.current!==rid)return;
+      inspectCache.current.set(path,info);setInspectedInfo(info);
+    }catch(e){
+      if(inspectIdRef.current!==rid)return;
+      setInspectedInfo(null);setInspectError(e instanceof Error?e.message:'读取失败');
+    }finally{
+      if(inspectIdRef.current===rid){if(inspectTimerRef.current!==null){window.clearTimeout(inspectTimerRef.current);inspectTimerRef.current=null;}setIsInspecting(false);}
     }
   };
 
-  const handleSelectInputPath = (path: string) => {
-    if (selectedInputPath === path && selectedOutputPath === null) {
-      return;
-    }
+  const handleSelectIn=(path:string)=>{if(selectedInputPath===path&&!selectedOutputPath)return;setSelectedInputPath(path);setSelectedOutputPath(null);inspectPath(path).catch(()=>{});};
+  const handleSelectOut=(path:string)=>{if(selectedOutputPath===path&&!selectedInputPath)return;setSelectedOutputPath(path);setSelectedInputPath(null);inspectPath(path).catch(()=>{});};
 
-    setSelectedInputPath(path);
-    setSelectedOutputPath(null);
-    inspectPathInfo(path).catch(() => undefined);
-  };
+  useEffect(()=>{if(selectedInputPath&&!inputPaths.includes(selectedInputPath)){setSelectedInputPath(null);setInspectedInfo(null);setInspectError('');};},[inputPaths,selectedInputPath]);
 
-  const handleSelectOutputPath = (path: string) => {
-    if (selectedOutputPath === path && selectedInputPath === null) {
-      return;
-    }
+  const outputItems=useMemo<BatchItemReport[]>(()=>report?report.items.filter(i=>Boolean(i.outputPath)):[],[report]);
+  useEffect(()=>{if(selectedOutputPath&&!outputItems.some(i=>i.outputPath===selectedOutputPath)){setSelectedOutputPath(null);setInspectedInfo(null);setInspectError('');};},[outputItems,selectedOutputPath]);
 
-    setSelectedOutputPath(path);
-    setSelectedInputPath(null);
-    inspectPathInfo(path).catch(() => undefined);
-  };
+  const patchCurrentParams=useCallback((id:ProcessorId,patch:Record<string,unknown>)=>{
+    if(runMode==='quick'){patchParams(id,patch);return;}
+    if(!activeWF||activeWF.processorId!==id)return;
+    patchWorkflowStepParams(activeWF.stepId,patch);
+  },[activeWF,patchParams,patchWorkflowStepParams,runMode]);
 
-  const cropPaths = cropCandidatePaths.length > 0 ? cropCandidatePaths : inputPaths;
-  const activeCropPath = cropPaths[cropActiveIndex] ?? null;
-
-  const openCropEditor = (path?: string) => {
-    const target = path ?? cropPaths[0];
-    if (!target) {
-      return;
-    }
-
-    const index = cropPaths.findIndex((item) => item === target);
-    setCropActiveIndex(index >= 0 ? index : 0);
-    handleSelectInputPath(target);
-    setIsCropEditorOpen(true);
-  };
-
-  const handleSelectCropPath = (path: string) => {
-    const index = cropPaths.findIndex((item) => item === path);
-    if (index >= 0) {
-      setCropActiveIndex(index);
-    }
-    handleSelectInputPath(path);
-  };
-
-  useEffect(() => {
-    if (cropActiveIndex >= cropPaths.length) {
-      setCropActiveIndex(0);
-    }
-  }, [cropActiveIndex, cropPaths.length]);
-
-  useEffect(() => {
-    if (!selectedInputPath) {
-      return;
-    }
-
-    if (!inputPaths.includes(selectedInputPath)) {
-      setSelectedInputPath(null);
-      setInspectedInfo(null);
-      setInspectError("");
-    }
-  }, [inputPaths, selectedInputPath]);
-
-  useEffect(() => {
-    if (!selectedOutputPath) {
-      return;
-    }
-
-    const stillExists = outputItems.some((item) => item.outputPath === selectedOutputPath);
-    if (!stillExists) {
-      setSelectedOutputPath(null);
-      setInspectedInfo(null);
-      setInspectError("");
-    }
-  }, [outputItems, selectedOutputPath]);
-
-  const start = async () => {
-    setUiError("");
-    resetReport();
-
-    if (inputPaths.length === 0) {
-      setUiError("请先选择输入文件或输入目录。");
-      return;
-    }
-
-    if (!outputDir.trim()) {
-      setUiError("请先选择输出目录。");
-      return;
-    }
-
-    if (runMode === "quick") {
-      if (!selectedProcessor?.enabled) {
-        setUiError("当前功能暂不可执行。");
-        return;
-      }
+  const start=async()=>{
+    setUiError('');resetReport();
+    if(!inputPaths.length){setUiError('请先选择输入文件或目录。');return;}
+    if(!outputDir.trim()){setUiError('请先选择输出目录。');return;}
+    if(runMode==='quick'){
+      const proc=allProcs.find(p=>p.id===selectedProcessorId);
+      if(!proc?.enabled){setUiError('当前功能暂不可用。');return;}
     } else {
-      if (workflowSteps.length === 0) {
-        setUiError("工作流模式至少需要一个步骤。");
-        return;
-      }
-
-      const unavailableStep = workflowSteps.find((step) => {
-        if (step.enabled === false) {
-          return false;
-        }
-        const processor = availableProcessors.find(
-          (item) => item.id === step.processorId,
-        );
-        return !processor || !processor.enabled;
-      });
-
-      if (unavailableStep) {
-        setUiError(`工作流包含不可用步骤：${unavailableStep.processorId}`);
-        return;
-      }
+      if(!workflowSteps.length){setUiError('工作流至少需要一个步骤。');return;}
+      const bad=workflowSteps.find(s=>s.enabled!==false&&!allProcs.find(p=>p.id===s.processorId)?.enabled);
+      if(bad){setUiError('工作流包含不可用步骤: '+bad.processorId);return;}
     }
-
-    try {
-      await ensureBatchListenersBound();
-    } catch {
-      setUiError("任务进度监听初始化失败，请重试。");
-      return;
-    }
-
-    beginRun();
-    setProgress({
-      jobId: activeJobId ?? "pending",
-      processed: 0,
-      total: 0,
-      succeeded: 0,
-      failed: 0,
-      skipped: 0,
-      cancelled: 0,
-      currentFile: "",
-      status: "running",
-      message: "任务已启动，等待后端回传进度...",
-    });
-
-    const effectiveProcessorId: ProcessorId =
-      runMode === "quick"
-        ? selectedProcessorId
-        : (workflowSteps[0]?.processorId ?? selectedProcessorId);
-
-    const workflowPayload =
-      runMode === "workflow"
-        ? workflowSteps.map((step) => ({
-            stepId: step.stepId,
-            processorId: step.processorId,
-            enabled: step.enabled ?? true,
-            params: step.params,
-          }))
-        : undefined;
-
-    try {
-      const nextReport = await startBatchJob({
-        processorId: effectiveProcessorId,
-        inputPaths,
-        outputDir,
-        params: runMode === "quick" ? selectedParams : {},
-        workflowSteps: workflowPayload,
-        renameConfig: renameConfig.enabled ? renameConfig : undefined,
-        includeSubdirectories,
-        maxConcurrency,
-        writeReport: true,
-      });
-
-      finishRun(nextReport);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "任务启动失败";
-      setUiError(reason);
-      finishRun({
-        jobId: activeJobId ?? "",
-        processorId: runMode === "workflow" ? "workflow" : selectedProcessorId,
-        startedAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
-        total: 0,
-        succeeded: 0,
-        failed: 0,
-        skipped: 0,
-        cancelled: 0,
-        items: [],
-      });
+    try{await ensureListeners();}catch{setUiError('监听初始化失败，请重试。');return;}
+    beginRun();setProgress({jobId:activeJobId??'pending',processed:0,total:0,succeeded:0,failed:0,skipped:0,cancelled:0,currentFile:'',status:'running',message:'任务已启动…'});
+    setActiveTab('run');
+    const wfPayload=runMode==='workflow'?workflowSteps.map(s=>({stepId:s.stepId,processorId:s.processorId,enabled:s.enabled??true,params:s.params})):undefined;
+    try{
+      const r=await startBatchJob({processorId:runMode==='quick'?selectedProcessorId:(workflowSteps[0]?.processorId??selectedProcessorId),inputPaths,outputDir,params:runMode==='quick'?selectedParams:{},workflowSteps:wfPayload,renameConfig:renameConfig.enabled?renameConfig:undefined,includeSubdirectories,maxConcurrency,writeReport:true});
+      handleFinishRun(r);
+    }catch(e){
+      const msg=e instanceof Error?e.message:'任务启动失败';
+      setUiError(msg);toastErr(msg);
+      finishRun({jobId:activeJobId??'',processorId:runMode==='workflow'?'workflow':selectedProcessorId,startedAt:new Date().toISOString(),finishedAt:new Date().toISOString(),total:0,succeeded:0,failed:0,skipped:0,cancelled:0,items:[]});
     }
   };
 
-  const cancel = async () => {
-    if (!activeJobId) {
-      return;
-    }
+  // store latest start in ref for keyboard shortcut
+  useEffect(()=>{startRef.current=start;});
 
-    try {
-      await cancelBatchJob(activeJobId);
-    } catch {
-      setUiError("取消任务失败，请稍后重试。");
-    }
+  const cancel=async()=>{
+    if(!activeJobId)return;
+    try{await cancelBatchJob(activeJobId);}catch{setUiError('取消失败，请稍后重试。');}
   };
 
-  const openOutputDir = async () => {
-    if (!outputDir) {
-      return;
-    }
-
-    try {
-      await openPathInSystem(outputDir);
-      setUiError("");
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "打开输出目录失败。";
-      setUiError(reason);
-    }
+  const openOutputDir=async()=>{
+    if(!outputDir)return;
+    try{await openPathInSystem(outputDir);setUiError('');}
+    catch(e){setUiError(e instanceof Error?e.message:'打开输出目录失败。');}
+  };
+  const openReport=async()=>{
+    if(!report?.reportPath)return;
+    try{await openPathInSystem(report.reportPath);setUiError('');}
+    catch(e){setUiError(e instanceof Error?e.message:'打开报告失败。');}
   };
 
-  const openReport = async () => {
-    if (!report?.reportPath) {
-      return;
-    }
-
-    try {
-      await openPathInSystem(report.reportPath);
-      setUiError("");
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "打开报告失败。";
-      setUiError(reason);
-    }
+  const openCropEditor=(path?:string)=>{
+    const tgt=path??cropPaths[0];if(!tgt)return;
+    const idx=cropPaths.indexOf(tgt);setCropIdx(idx>=0?idx:0);handleSelectIn(tgt);setIsCropOpen(true);
   };
-
-  const renderParams = () => {
-    if (!parameterEditorProcessorId) {
-      return <p className="muted">请先在工作流中选择一个步骤。</p>;
-    }
-
-    switch (parameterEditorProcessorId) {
-      case "trim-transparent":
-        return (
-          <>
-            <label className="field">
-              <span>透明阈值 (0-255)</span>
-              <input
-                type="number"
-                min={0}
-                max={255}
-                disabled={isRunning}
-                value={clampInt(selectedParams.alphaThreshold, 0, 255)}
-                onChange={(event) =>
-                  patchCurrentParams("trim-transparent", {
-                    alphaThreshold: clampInt(
-                      Number(event.target.value),
-                      0,
-                      255,
-                    ),
-                  })
-                }
-              />
-            </label>
-            <label className="field">
-              <span>保留边距 (px)</span>
-              <input
-                type="number"
-                min={0}
-                max={200}
-                disabled={isRunning}
-                value={clampInt(selectedParams.padding, 0, 200)}
-                onChange={(event) =>
-                  patchCurrentParams("trim-transparent", {
-                    padding: clampInt(Number(event.target.value), 0, 200),
-                  })
-                }
-              />
-            </label>
-          </>
-        );
-      case "format-convert":
-        return (
-          <label className="field">
-            <span>目标格式</span>
-            <select
-              value={String(selectedParams.targetFormat ?? "png")}
-              onChange={(event) =>
-                patchCurrentParams("format-convert", {
-                  targetFormat: event.target.value,
-                })
-              }
-              disabled={isRunning}
-            >
-              <option value="png">PNG</option>
-              <option value="jpg">JPG</option>
-              <option value="webp">WEBP</option>
-            </select>
-          </label>
-        );
-      case "compress":
-        return (
-          <>
-            <label className="field">
-              <span>压缩模式</span>
-              <select
-                value={String(selectedParams.mode ?? "balanced")}
-                onChange={(event) =>
-                  patchCurrentParams("compress", {
-                    mode: event.target.value,
-                  })
-                }
-                disabled={isRunning}
-              >
-                <option value="balanced">balanced（平衡）</option>
-                <option value="lossy">lossy（有损）</option>
-                <option value="lossless">lossless（无损）</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>压缩质量 (1-100)</span>
-              <input
-                type="number"
-                min={1}
-                max={100}
-                disabled={isRunning}
-                value={clampInt(selectedParams.quality, 1, 100)}
-                onChange={(event) =>
-                  patchCurrentParams("compress", {
-                    quality: clampInt(Number(event.target.value), 1, 100),
-                  })
-                }
-              />
-            </label>
-          </>
-        );
-      case "repair":
-      {
-        const repairMode = String(selectedParams.mode ?? "auto");
-        return (
-          <>
-            <label className="field">
-              <span>修复模式</span>
-              <select
-                value={repairMode}
-                onChange={(event) =>
-                  patchCurrentParams("repair", { mode: event.target.value })
-                }
-                disabled={isRunning}
-              >
-                <option value="auto">自动</option>
-                <option value="denoise">去噪</option>
-                <option value="scratch">划痕修复</option>
-                <option value="upscale">低分辨率增强</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>修复强度 (1-100)</span>
-              <input
-                type="number"
-                min={PARAM_MIN_STRENGTH}
-                max={PARAM_MAX_STRENGTH}
-                disabled={isRunning}
-                value={clampInt(selectedParams.strength, PARAM_MIN_STRENGTH, PARAM_MAX_STRENGTH)}
-                onChange={(event) =>
-                  patchCurrentParams("repair", {
-                    strength: clampInt(
-                      Number(event.target.value),
-                      PARAM_MIN_STRENGTH,
-                      PARAM_MAX_STRENGTH,
-                    ),
-                  })
-                }
-              />
-            </label>
-            {repairMode === "upscale" ? (
-              <>
-                <label className="field">
-                  <span>放大倍数 (2-4)</span>
-                  <select
-                    value={String(clampInt(selectedParams.upscaleFactor, 2, 4))}
-                    onChange={(event) =>
-                      patchCurrentParams("repair", {
-                        upscaleFactor: clampInt(Number(event.target.value), 2, 4),
-                      })
-                    }
-                    disabled={isRunning}
-                  >
-                    <option value="2">2x</option>
-                    <option value="3">3x</option>
-                    <option value="4">4x</option>
-                  </select>
-                </label>
-                <label className="field">
-                  <span>超分锐化强度 (1-100)</span>
-                  <input
-                    type="number"
-                    min={PARAM_MIN_STRENGTH}
-                    max={PARAM_MAX_STRENGTH}
-                    disabled={isRunning}
-                    value={clampInt(
-                      selectedParams.upscaleSharpness,
-                      PARAM_MIN_STRENGTH,
-                      PARAM_MAX_STRENGTH,
-                    )}
-                    onChange={(event) =>
-                      patchCurrentParams("repair", {
-                        upscaleSharpness: clampInt(
-                          Number(event.target.value),
-                          PARAM_MIN_STRENGTH,
-                          PARAM_MAX_STRENGTH,
-                        ),
-                      })
-                    }
-                  />
-                </label>
-              </>
-            ) : null}
-          </>
-        );
-      }
-      case "resolution-transform":
-      {
-        const candidatePaths =
-          overrideCandidatePaths.length > 0
-            ? overrideCandidatePaths
-            : inputPaths;
-        const globalTargetWidth = clampInt(
-          selectedParams.targetWidth,
-          RESOLUTION_MIN_EDGE,
-          RESOLUTION_MAX_EDGE,
-        );
-        const globalTargetHeight = clampInt(
-          selectedParams.targetHeight,
-          RESOLUTION_MIN_EDGE,
-          RESOLUTION_MAX_EDGE,
-        );
-        const sharpness = clampInt(
-          selectedParams.upscaleSharpness,
-          PARAM_MIN_STRENGTH,
-          PARAM_MAX_STRENGTH,
-        );
-        const fileOverrides =
-          (selectedParams.fileOverrides as ResolutionFileOverrideMap | undefined) ?? {};
-
-        const setFileOverrideEnabled = (path: string, enabled: boolean) => {
-          const nextOverrides = { ...fileOverrides };
-
-          if (!enabled) {
-            delete nextOverrides[path];
-          } else {
-            nextOverrides[path] = {
-              targetWidth: globalTargetWidth,
-              targetHeight: globalTargetHeight,
-            };
-          }
-
-          patchCurrentParams("resolution-transform", {
-            fileOverrides: nextOverrides,
-          });
-        };
-
-        const patchFileOverride = (
-          path: string,
-          patch: { targetWidth?: number; targetHeight?: number },
-        ) => {
-          const current = fileOverrides[path] ?? {
-            targetWidth: globalTargetWidth,
-            targetHeight: globalTargetHeight,
-          };
-
-          patchCurrentParams("resolution-transform", {
-            fileOverrides: {
-              ...fileOverrides,
-              [path]: {
-                targetWidth: clampInt(
-                  patch.targetWidth ?? current.targetWidth,
-                  RESOLUTION_MIN_EDGE,
-                  RESOLUTION_MAX_EDGE,
-                ),
-                targetHeight: clampInt(
-                  patch.targetHeight ?? current.targetHeight,
-                  RESOLUTION_MIN_EDGE,
-                  RESOLUTION_MAX_EDGE,
-                ),
-              },
-            },
-          });
-        };
-
-        return (
-          <>
-                  <label className="field">
-                    <span>目标宽度 (1-16384)</span>
-                    <input
-                      type="number"
-                      min={RESOLUTION_MIN_EDGE}
-                      max={RESOLUTION_MAX_EDGE}
-                      disabled={isRunning}
-                      value={globalTargetWidth}
-                      onChange={(event) =>
-                        patchCurrentParams("resolution-transform", {
-                          targetWidth: clampInt(
-                            Number(event.target.value),
-                            RESOLUTION_MIN_EDGE,
-                            RESOLUTION_MAX_EDGE,
-                          ),
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>目标高度 (1-16384)</span>
-                    <input
-                      type="number"
-                      min={RESOLUTION_MIN_EDGE}
-                      max={RESOLUTION_MAX_EDGE}
-                      disabled={isRunning}
-                      value={globalTargetHeight}
-                      onChange={(event) =>
-                        patchCurrentParams("resolution-transform", {
-                          targetHeight: clampInt(
-                            Number(event.target.value),
-                            RESOLUTION_MIN_EDGE,
-                            RESOLUTION_MAX_EDGE,
-                          ),
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>超分锐化强度 (1-100)</span>
-                    <input
-                      type="number"
-                      min={PARAM_MIN_STRENGTH}
-                      max={PARAM_MAX_STRENGTH}
-                      disabled={isRunning}
-                      value={sharpness}
-                      onChange={(event) =>
-                        patchCurrentParams("resolution-transform", {
-                          upscaleSharpness: clampInt(
-                            Number(event.target.value),
-                            PARAM_MIN_STRENGTH,
-                            PARAM_MAX_STRENGTH,
-                          ),
-                        })
-                      }
-                    />
-                  </label>
-                  <p className="hint">
-                    PNG：当目标比例与图像主体比例不同，会透明居中填充到目标分辨率。JPG/WEBP：始终保持原图比例并适配到目标框内。
-                  </p>
-
-                  <section className="input-list resolution-override-list">
-                    <h3>单文件目标分辨率（可选）</h3>
-                    {isLoadingOverrideCandidates ? (
-                      <p className="muted">正在加载本次批处理图片列表...</p>
-                    ) : null}
-                    {overrideCandidatesError ? (
-                      <p className="error-inline">{overrideCandidatesError}</p>
-                    ) : null}
-                    {candidatePaths.length === 0 ? (
-                      <p className="muted">先选择输入文件后可为每个文件单独设置目标分辨率。</p>
-                    ) : (
-                      <ul className="resolution-override-items">
-                        {candidatePaths.map((path) => {
-                          const override = fileOverrides[path];
-                          const enabled = Boolean(override);
-                          const targetWidth = clampInt(
-                            override?.targetWidth ?? globalTargetWidth,
-                            RESOLUTION_MIN_EDGE,
-                            RESOLUTION_MAX_EDGE,
-                          );
-                          const targetHeight = clampInt(
-                            override?.targetHeight ?? globalTargetHeight,
-                            RESOLUTION_MIN_EDGE,
-                            RESOLUTION_MAX_EDGE,
-                          );
-
-                          return (
-                            <li key={path} className="resolution-override-item">
-                              <label className="inline-checkbox resolution-override-toggle">
-                                <input
-                                  type="checkbox"
-                                  checked={enabled}
-                                  disabled={isRunning}
-                                  onChange={(event) =>
-                                    setFileOverrideEnabled(path, event.target.checked)
-                                  }
-                                />
-                                <span className="resolution-override-path">{path}</span>
-                              </label>
-                              <div className="resolution-override-controls">
-                                <label className="field">
-                                  <span>目标宽度</span>
-                                  <input
-                                    type="number"
-                                    min={RESOLUTION_MIN_EDGE}
-                                    max={RESOLUTION_MAX_EDGE}
-                                    disabled={isRunning || !enabled}
-                                    value={targetWidth}
-                                    onChange={(event) =>
-                                      patchFileOverride(path, {
-                                        targetWidth: clampInt(
-                                          Number(event.target.value),
-                                          RESOLUTION_MIN_EDGE,
-                                          RESOLUTION_MAX_EDGE,
-                                        ),
-                                      })
-                                    }
-                                  />
-                                </label>
-                                <label className="field">
-                                  <span>目标高度</span>
-                                  <input
-                                    type="number"
-                                    min={RESOLUTION_MIN_EDGE}
-                                    max={RESOLUTION_MAX_EDGE}
-                                    disabled={isRunning || !enabled}
-                                    value={targetHeight}
-                                    onChange={(event) =>
-                                      patchFileOverride(path, {
-                                        targetHeight: clampInt(
-                                          Number(event.target.value),
-                                          RESOLUTION_MIN_EDGE,
-                                          RESOLUTION_MAX_EDGE,
-                                        ),
-                                      })
-                                    }
-                                  />
-                                </label>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </section>
-          </>
-        );
-      }
-      case "upscale-anime":
-      {
-        const scaleValue = clampInt(selectedParams.scale, 2, 4);
-        const denoiseValue = clampInt(selectedParams.denoiseLevel, 1, 3);
-
-        return (
-          <>
-            <label className="field">
-              <span>倍率</span>
-              <select
-                value={String(scaleValue === 4 ? 4 : 2)}
-                onChange={(event) =>
-                  patchCurrentParams("upscale-anime", {
-                    scale: Number(event.target.value) === 4 ? 4 : 2,
-                  })
-                }
-                disabled={isRunning}
-              >
-                <option value="2">2x</option>
-                <option value="4">4x</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>降噪等级 (1-3)</span>
-              <select
-                value={String(denoiseValue)}
-                onChange={(event) =>
-                  patchCurrentParams("upscale-anime", {
-                    denoiseLevel: clampInt(Number(event.target.value), 1, 3),
-                  })
-                }
-                disabled={isRunning}
-              >
-                <option value="1">1（厚涂保留笔触）</option>
-                <option value="2">2（厚涂/半厚涂）</option>
-                <option value="3">3（赛璐珞/伪厚涂）</option>
-              </select>
-            </label>
-            <p className="hint">
-              建议：赛璐珞/伪厚涂使用 3；厚涂可降低到 1-2 以保留笔触。
-            </p>
-          </>
-        );
-      }
-      case "manual-crop":
-      {
-        const params = selectedParams as unknown as ManualCropParams;
-        const applyMode = params.applyMode === "absolute" ? "absolute" : "percent";
-        const viewMode = params.viewMode === "actual" ? "actual" : "fit";
-        const aspectRatio = params.aspectRatio ?? "";
-        const fileOverrides = params.fileOverrides ?? {};
-        const overrideEntries = Object.values(fileOverrides);
-        const configuredCount = overrideEntries.filter(
-          (item) => item.skip || item.rect || item.percentRect,
-        ).length;
-        const skippedCount = overrideEntries.filter((item) => item.skip).length;
-
-        return (
-          <>
-            <label className="field">
-              <span>锁定比例（可空）</span>
-              <input
-                type="text"
-                placeholder="16:9 / 4:3 / 1.78"
-                value={aspectRatio}
-                disabled={isRunning}
-                onChange={(event) =>
-                  patchCurrentParams("manual-crop", { aspectRatio: event.target.value })
-                }
-              />
-            </label>
-            <label className="field">
-              <span>应用到全部模式</span>
-              <select
-                value={applyMode}
-                onChange={(event) =>
-                  patchCurrentParams("manual-crop", { applyMode: event.target.value })
-                }
-                disabled={isRunning}
-              >
-                <option value="percent">按比例（适配不同尺寸）</option>
-                <option value="absolute">按绝对像素（尺寸需满足）</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>视图模式</span>
-              <select
-                value={viewMode}
-                onChange={(event) =>
-                  patchCurrentParams("manual-crop", { viewMode: event.target.value })
-                }
-                disabled={isRunning}
-              >
-                <option value="fit">适应窗口</option>
-                <option value="actual">原始大小</option>
-              </select>
-            </label>
-            <div className="toolbar">
-              <button
-                type="button"
-                onClick={() => openCropEditor(selectedInputPath ?? cropPaths[0])}
-                disabled={
-                  isRunning ||
-                  isLoadingCropCandidates ||
-                  cropPaths.length === 0
-                }
-              >
-                打开裁剪编辑器
-              </button>
-            </div>
-            {isLoadingCropCandidates ? (
-              <p className="muted">正在加载裁剪图片列表...</p>
-            ) : null}
-            {cropCandidatesError ? (
-              <p className="error-inline">{cropCandidatesError}</p>
-            ) : null}
-            {cropPaths.length === 0 ? (
-              <p className="muted">先选择输入文件后再配置裁剪区域。</p>
-            ) : (
-              <p className="hint">
-                已配置 {configuredCount} 张，跳过 {skippedCount} 张。
-              </p>
-            )}
-            <p className="hint">
-              裁剪坐标使用原始像素尺寸；绝对像素模式会校验尺寸是否满足。
-            </p>
-          </>
-        );
-      }
-      case "rename":
-        return (
-          <p className="muted">
-            重命名规则请在“批量重命名”面板中配置。
-          </p>
-        );
-      default:
-        return <p className="muted">该功能暂未定义参数。</p>;
-    }
-  };
+  const handleCropSelect=(path:string)=>{const i=cropPaths.indexOf(path);if(i>=0)setCropIdx(i);handleSelectIn(path);};
+  useEffect(()=>{if(cropIdx>=cropPaths.length)setCropIdx(0);},[cropIdx,cropPaths.length]);
 
   return (
-    <main className="app-shell">
-      <header className="hero">
-        <div>
-          <h1>Art Tool</h1>
-          <p>
-            批量图像处理桌面工具。支持快捷模式与工作流模式，提供二次元超分、批量重命名与步骤编排能力。
-          </p>
+    <div className="app-root">
+      <Sidebar
+        active={activeTab} onNav={setActiveTab}
+        isRunning={isRunning} failedCount={report?.failed??0}
+        onStart={start} onCancel={cancel}
+        theme={theme} onThemeToggle={()=>setTheme(t=>t==="dark"?"light":"dark")}
+      />
+      <div className="main-content">
+        <div className="main-scroll">
+          {uiError&&<div className="error-banner">{uiError}</div>}
+
+          {activeTab==="input"&&<>
+            <section className="panel">
+              <div className="panel-h"><h2>输入与输出</h2></div>
+              <BatchInputPanel inputPaths={inputPaths} outputDir={outputDir}
+                includeSubdirectories={includeSubdirectories} maxConcurrency={maxConcurrency}
+                isRunning={isRunning} onInputPathsChange={setInputPaths} onOutputDirChange={setOutputDir}
+                onIncludeSubdirectoriesChange={setIncludeSubdirectories} onMaxConcurrencyChange={setMaxConcurrency}/>
+            </section>
+            <section className="panel">
+              <div className="panel-h"><h2>文件检查</h2></div>
+              <FileInspectorPanel inputPaths={inputPaths} outputItems={outputItems}
+                selectedInputPath={selectedInputPath} selectedOutputPath={selectedOutputPath}
+                inspectedInfo={inspectedInfo} isInspecting={isInspecting} inspectError={inspectError}
+                onSelectInputPath={handleSelectIn} onSelectOutputPath={handleSelectOut}/>
+            </section>
+          </>}
+
+          {activeTab==="function"&&<>
+            <section className="panel">
+              <div className="panel-h"><h2>运行模式</h2></div>
+              <label className="field">
+                <span>处理模式</span>
+                <select value={runMode} disabled={isRunning}
+                  onChange={e=>setRunMode(e.target.value as "quick"|"workflow")}>
+                  <option value="quick">快捷模式（单功能）</option>
+                  <option value="workflow">工作流模式（多步骤）</option>
+                </select>
+              </label>
+              <p className="hint">快捷模式适合单一任务，工作流模式可串联多个步骤。</p>
+            </section>
+            {runMode==="quick"?(
+              <section className="panel">
+                <div className="panel-h"><h2>功能选择</h2></div>
+                <FunctionSelector processors={allProcs} selectedProcessorId={selectedProcessorId}
+                  onSelect={id=>setSelectedProcessorId(id as ProcessorId)}/>
+              </section>
+            ):(
+              <WorkflowBuilder processors={allProcs} steps={workflowSteps}
+                activeStepId={activeWF?.stepId??null} isRunning={isRunning}
+                onSelectStep={setActiveWorkflowStepId} onAddStep={addWorkflowStep}
+                onRemoveStep={removeWorkflowStep} onMoveStep={moveWorkflowStep}
+                onChangeStepProcessor={updateWorkflowStepProcessor} onToggleStepEnabled={setWorkflowStepEnabled}/>
+            )}
+          </>}
+
+          {activeTab==="params"&&<>
+            <section className="panel">
+              <div className="panel-h">
+                <h2>参数设置{runMode==="workflow"&&activeWFIdx>=0?"（步骤 "+(activeWFIdx+1)+"）":""}</h2>
+              </div>
+              <ParameterEditor processorId={paramProcId} params={selectedParams} isRunning={isRunning}
+                overridePaths={overrideCandidates} cropPaths={cropPaths}
+                isLoadingOverrides={isLoadingOC} overridesError={ocError}
+                isLoadingCrop={isLoadingCC} cropError={ccError} selectedInputPath={selectedInputPath}
+                onPatch={patchCurrentParams} onOpenCropEditor={openCropEditor}/>
+            </section>
+            <section className="panel">
+              <div className="panel-h"><h2>批量重命名</h2></div>
+              <RenameRulePanel config={renameConfig} isRunning={isRunning} onChange={patchRenameConfig}/>
+            </section>
+          </>}
+
+          {activeTab==="run"&&(
+            <section className="panel">
+              <div className="panel-h"><h2>任务进度</h2></div>
+              <TaskQueuePanel isRunning={isRunning} progress={progress} onCancel={cancel}
+                canCancel={Boolean(isRunning&&activeJobId)}/>
+            </section>
+          )}
+
+          {activeTab==="results"&&(
+            <section className="panel">
+              <div className="panel-h"><h2>结果汇总</h2></div>
+              <ResultSummaryPanel report={report} onOpenOutputDir={openOutputDir} onOpenReport={openReport}/>
+            </section>
+          )}
         </div>
-        <div className="hero-actions">
-          <button type="button" onClick={start} disabled={isRunning}>
-            开始处理
-          </button>
-        </div>
-      </header>
+      </div>
 
-      {uiError ? <div className="error-banner">{uiError}</div> : null}
-
-      <section className="layout-grid">
-        <section className="panel">
-          <h2>运行模式</h2>
-          <label className="field">
-            <span>处理模式</span>
-            <select
-              value={runMode}
-              onChange={(event) => setRunMode(event.target.value as "quick" | "workflow")}
-              disabled={isRunning}
-            >
-              <option value="quick">快捷模式（单功能）</option>
-              <option value="workflow">工作流模式（多步骤）</option>
-            </select>
-          </label>
-          <p className="hint">
-            快捷模式适合单一任务，工作流模式可按顺序串联多个处理步骤。
-          </p>
-        </section>
-
-        {runMode === "quick" ? (
-          <FunctionSelector
-            processors={availableProcessors.length ? availableProcessors : fallbackProcessors}
-            selectedProcessorId={selectedProcessorId}
-            onSelect={(id) => setSelectedProcessorId(id as ProcessorId)}
-          />
-        ) : (
-          <WorkflowBuilder
-            processors={availableProcessors.length ? availableProcessors : fallbackProcessors}
-            steps={workflowSteps}
-            activeStepId={activeWorkflowStep?.stepId ?? null}
-            isRunning={isRunning}
-            onSelectStep={setActiveWorkflowStepId}
-            onAddStep={addWorkflowStep}
-            onRemoveStep={removeWorkflowStep}
-            onMoveStep={moveWorkflowStep}
-            onChangeStepProcessor={updateWorkflowStepProcessor}
-            onToggleStepEnabled={setWorkflowStepEnabled}
-          />
-        )}
-
-        <section className="panel">
-          <h2>
-            参数设置
-            {runMode === "workflow" && activeWorkflowStepIndex >= 0
-              ? `（步骤 ${activeWorkflowStepIndex + 1}）`
-              : ""}
-          </h2>
-          {renderParams()}
-        </section>
-
-        <RenameRulePanel
-          config={renameConfig}
-          isRunning={isRunning}
-          onChange={patchRenameConfig}
-        />
-
-        <BatchInputPanel
-          inputPaths={inputPaths}
-          outputDir={outputDir}
-          includeSubdirectories={includeSubdirectories}
-          maxConcurrency={maxConcurrency}
-          isRunning={isRunning}
-          onInputPathsChange={setInputPaths}
-          onOutputDirChange={setOutputDir}
-          onIncludeSubdirectoriesChange={setIncludeSubdirectories}
-          onMaxConcurrencyChange={setMaxConcurrency}
-        />
-
-        <FileInspectorPanel
-          inputPaths={inputPaths}
-          outputItems={outputItems}
-          selectedInputPath={selectedInputPath}
-          selectedOutputPath={selectedOutputPath}
-          inspectedInfo={inspectedInfo}
-          isInspecting={isInspecting}
-          inspectError={inspectError}
-          onSelectInputPath={handleSelectInputPath}
-          onSelectOutputPath={handleSelectOutputPath}
-        />
-
-        <TaskQueuePanel
-          isRunning={isRunning}
-          progress={progress}
-          onCancel={cancel}
-          canCancel={Boolean(isRunning && activeJobId)}
-        />
-
-        <ResultSummaryPanel
-          report={report}
-          onOpenOutputDir={openOutputDir}
-          onOpenReport={openReport}
-        />
-      </section>
-
-        <CropEditorModal
-          isOpen={isCropEditorOpen}
-          isRunning={isRunning}
-          paths={cropPaths}
-          activePath={activeCropPath}
-          params={selectedParams as unknown as ManualCropParams}
-          onPatchParams={(patch) => patchCurrentParams("manual-crop", patch)}
-          onSelectPath={handleSelectCropPath}
-          onClose={() => setIsCropEditorOpen(false)}
-        />
-    </main>
+      <ToastContainer/>
+      <CropEditorModal isOpen={isCropOpen} isRunning={isRunning} paths={cropPaths}
+        activePath={activeCropPath} params={selectedParams as unknown as ManualCropParams}
+        onPatchParams={patch=>patchCurrentParams("manual-crop",patch)}
+        onSelectPath={handleCropSelect} onClose={()=>setIsCropOpen(false)}/>
+    </div>
   );
 }

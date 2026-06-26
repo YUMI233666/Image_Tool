@@ -1,92 +1,43 @@
 import type { BatchProgressPayload } from "../lib/types";
 
-interface TaskQueuePanelProps {
-  isRunning: boolean;
-  progress: BatchProgressPayload | null;
-  onCancel: () => void;
-  canCancel: boolean;
+interface Props{
+  isRunning:boolean;progress:BatchProgressPayload|null;
+  onCancel:()=>void;canCancel:boolean;
+}
+function pct(p:BatchProgressPayload|null){
+  return(!p||p.total===0)?0:Math.round(p.processed/p.total*100);
 }
 
-function getPercent(progress: BatchProgressPayload | null): number {
-  if (!progress || progress.total === 0) {
-    return 0;
-  }
+export default function TaskQueuePanel({isRunning,progress,onCancel,canCancel}:Props){
+  const pc=pct(progress);
+  return(
+    <div>
+      {!isRunning&&!progress&&<p className="muted">暂无运行中的任务。点击「开始处理」启动。</p>}
+      {isRunning&&!progress&&<p className="muted">任务已启动，等待后端回传进度…</p>}
 
-  return Math.round((progress.processed / progress.total) * 100);
-}
-
-export default function TaskQueuePanel({
-  isRunning,
-  progress,
-  onCancel,
-  canCancel,
-}: TaskQueuePanelProps) {
-  const percent = getPercent(progress);
-
-  return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>任务队列</h2>
-        <button type="button" className="danger" onClick={onCancel} disabled={!canCancel}>
-          取消任务
-        </button>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+        <span style={{fontSize:13,color:"var(--tx-m)"}}>{pc}% {progress?.currentFile?"— "+progress.currentFile.split("/").pop():""}</span>
+        <button type="button" className="danger sm" onClick={onCancel} disabled={!canCancel}>⏹ 取消</button>
       </div>
 
-      {!isRunning && !progress ? (
-        <p className="muted">当前没有运行中的任务。</p>
-      ) : null}
-
-      {isRunning && !progress ? (
-        <p className="muted">任务已启动，正在等待进度回传...</p>
-      ) : null}
-
-      <div className="progress-track" aria-label="batch-progress-track">
-        <div className="progress-bar" style={{ width: `${percent}%` }} />
+      <div className="progress-track" role="progressbar" aria-valuenow={pc} aria-valuemin={0} aria-valuemax={100}>
+        <div className="progress-bar" style={{width:pc+"%"}}/>
       </div>
 
       <div className="stats-grid">
-        <div>
-          <span>进度</span>
-          <strong>
-            {progress?.processed ?? 0}/{progress?.total ?? 0}
-          </strong>
-        </div>
-        <div>
-          <span>成功</span>
-          <strong>{progress?.succeeded ?? 0}</strong>
-        </div>
-        <div>
-          <span>失败</span>
-          <strong>{progress?.failed ?? 0}</strong>
-        </div>
-        <div>
-          <span>跳过</span>
-          <strong>{progress?.skipped ?? 0}</strong>
-        </div>
+        <div><span>进度</span><strong>{progress?.processed??0}/{progress?.total??0}</strong></div>
+        <div><span>成功</span><strong style={{color:"var(--ok)"}}>{progress?.succeeded??0}</strong></div>
+        <div><span>失败</span><strong style={{color:"var(--er)"}}>{progress?.failed??0}</strong></div>
+        <div><span>跳过</span><strong style={{color:"var(--wn)"}}>{progress?.skipped??0}</strong></div>
       </div>
 
-      {progress ? (
+      {progress?.currentStepProcessorId&&(
         <div className="queue-item">
-          <p>
-            当前文件: <span>{progress.currentFile || "(等待中)"}</span>
-          </p>
-          {progress.currentStepProcessorId ? (
-            <p>
-              当前步骤: <span>{progress.currentStepProcessorId}</span>
-              {progress.currentStepIndex && progress.currentStepTotal
-                ? `（${progress.currentStepIndex}/${progress.currentStepTotal}）`
-                : ""}
-            </p>
-          ) : null}
-          <p>
-            状态: <span>{progress.status}</span>
-          </p>
-          {progress.currentStepMessage ? (
-            <p className="hint">步骤信息: {progress.currentStepMessage}</p>
-          ) : null}
-          <p className="hint">{progress.message}</p>
+          <p>步骤 <span>{progress.currentStepIndex}/{progress.currentStepTotal}</span>
+            &nbsp;—&nbsp;<span>{progress.currentStepProcessorId}</span></p>
+          {progress.currentStepMessage&&<p className="hint">{progress.currentStepMessage}</p>}
         </div>
-      ) : null}
-    </section>
+      )}
+    </div>
   );
 }
