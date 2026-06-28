@@ -1,50 +1,43 @@
 import type { ProcessorDescriptor, ProcessorId } from "../lib/types";
 
-interface FunctionSelectorProps {
+const ICONS: Record<string, string> = {
+  "trim-transparent": "✂️",
+  "format-convert":   "🔄",
+  "compress":         "🗜️",
+  "repair":           "🔧",
+  "resolution-transform": "📐",
+  "rename":           "✏️",
+  "upscale-anime":    "⭐",
+  "manual-crop":      "✂",
+};
+
+interface Props {
   processors: ProcessorDescriptor[];
   selectedProcessorId: ProcessorId;
   onSelect: (id: ProcessorId) => void;
 }
 
-export default function FunctionSelector({
-  processors,
-  selectedProcessorId,
-  onSelect,
-}: FunctionSelectorProps) {
-  const selected =
-    processors.find((item) => item.id === selectedProcessorId) ?? processors[0];
-
+export default function FunctionSelector({ processors, selectedProcessorId, onSelect }: Props) {
   return (
-    <section className="panel">
-      <h2>功能选择</h2>
-      <p className="muted">
-        当前版本可用：透明边缘裁剪、手动裁剪、图像格式转换、图像压缩、图像修复、变换分辨率、二次元超分、批量重命名。
+    <div>
+      <p className="muted" style={{marginBottom:10}}>
+        选择要执行的处理功能。
       </p>
-
-      <label className="field">
-        <span>处理功能</span>
-        <select
-          value={selectedProcessorId}
-          onChange={(event) => onSelect(event.target.value as ProcessorId)}
-        >
-          {processors.map((processor) => (
-            <option
-              key={processor.id}
-              value={processor.id}
-              disabled={!processor.enabled}
-            >
-              {processor.displayName}
-              {!processor.enabled ? "（暂不可用）" : ""}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {selected ? (
-        <p className="hint">{selected.notes}</p>
-      ) : (
-        <p className="hint">尚未加载处理器列表。</p>
-      )}
-    </section>
+      <div className="fn-grid">
+        {processors.map(p => (
+          <button
+            key={p.id}
+            type="button"
+            className={"fn-card" + (selectedProcessorId === p.id ? " selected" : "")}
+            onClick={() => onSelect(p.id as ProcessorId)}
+            disabled={!p.enabled}
+          >
+            <span className="fn-card-icon">{ICONS[p.id] ?? "🖼"}</span>
+            <span className="fn-card-name">{p.displayName}</span>
+            <span className="fn-card-note">{p.notes}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
